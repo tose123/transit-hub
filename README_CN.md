@@ -57,11 +57,11 @@ TransitHub 是一个自部署的后台运营中心，用于管理多个上游站
 生产部署文件位于 `deploy/` 目录。
 
 ```bash
-git clone <your-repo-url> transit-hub
+git clone https://github.com/deviseo/transit-hub.git transit-hub
 cd transit-hub
 
 # 先编辑 deploy/docker-compose.prod.yml：
-# - 镜像 tag
+# - 镜像 tag（默认使用 deviseo/transithub:latest）
 # - 数据库密码
 # - ADMIN_EMAIL / ADMIN_PASSWORD
 # - 如需自定义后台展示版本，可调整 APP_VERSION
@@ -103,7 +103,7 @@ docker compose -f deploy/docker-compose.yml up -d
 由于 Dockerfile 放在 `deploy/`，但构建上下文需要使用仓库根目录，请使用：
 
 ```bash
-docker build -f deploy/Dockerfile -t transithub:local .
+docker build -f deploy/Dockerfile -t deviseo/transithub:latest .
 ```
 
 ## 本地开发
@@ -193,11 +193,11 @@ transit-hub/
 
 ## Star History 星际历史
 
-<a href="https://star-history.com/#qjp_ai/transit-hub&Date">
+<a href="https://star-history.com/#deviseo/transit-hub&Date">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=qjp_ai/transit-hub&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=qjp_ai/transit-hub&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=qjp_ai/transit-hub&type=Date" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=deviseo/transit-hub&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=deviseo/transit-hub&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=deviseo/transit-hub&type=Date" />
   </picture>
 </a>
 

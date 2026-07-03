@@ -3,8 +3,8 @@
 services:
   # TransitHub 应用服务：包含 Go 后端和已构建的前端静态文件。
   app:
-    # 改成你实际发布的镜像地址和 tag。
-    image: deviseo/transithub:0.1.0
+    # 默认使用 Docker Hub 最新镜像；如需固定版本，可改为 deviseo/transithub:0.1.1。
+    image: deviseo/transithub:latest
     restart: unless-stopped
     depends_on:
       postgres:
