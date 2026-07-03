@@ -57,11 +57,11 @@ The project is built as a Go backend with a Vue 3 admin frontend, backed by Post
 Production compose files live under `deploy/`.
 
 ```bash
-git clone <your-repo-url> transit-hub
+git clone https://github.com/deviseo/transit-hub.git transit-hub
 cd transit-hub
 
 # Edit deploy/docker-compose.prod.yml first:
-# - image tag
+# - image tag (defaults to deviseo/transithub:latest)
 # - database password
 # - ADMIN_EMAIL / ADMIN_PASSWORD
 # - APP_VERSION if you want a custom version label
@@ -103,7 +103,7 @@ This starts PostgreSQL and Redis on local ports `5432` and `6379`.
 Because the Dockerfile is stored in `deploy/` but expects the repository root as build context, build with:
 
 ```bash
-docker build -f deploy/Dockerfile -t transithub:local .
+docker build -f deploy/Dockerfile -t deviseo/transithub:latest .
 ```
 
 ## Local Development
@@ -193,11 +193,11 @@ transit-hub/
 
 ## Star History
 
-<a href="https://star-history.com/#qjp_ai/transit-hub&Date">
+<a href="https://star-history.com/#deviseo/transit-hub&Date">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=qjp_ai/transit-hub&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=qjp_ai/transit-hub&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=qjp_ai/transit-hub&type=Date" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=deviseo/transit-hub&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=deviseo/transit-hub&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=deviseo/transit-hub&type=Date" />
   </picture>
 </a>
 
