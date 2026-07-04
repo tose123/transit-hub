@@ -23,6 +23,39 @@
 - **自部署责任**：你需要自行保护管理员凭据、数据库备份、网络访问权限和部署密钥。
 - **免责声明**：本项目仅用于技术学习。你需要自行确保使用方式符合适用法律法规和上游平台规则。因使用本项目导致的服务中断、账号限制、数据丢失或其他直接/间接损失，作者不承担责任。
 
+## 赞助商
+
+<table>
+<thead>
+<tr>
+<th align="center" valign="middle" width="30%">名称</th>
+<th align="left" valign="middle" width="70%">描述</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="center" valign="middle" width="130"><a href="https://web.ymocode.com"><img src="docs/assets/sponsors/yimous.png" alt="Yimo-US logo" height="22"><br><strong>Yimo-US</strong></a></td>
+<td valign="middle" width="78%">专注于稳定接入与多上游聚合的 API 服务品牌，面向高可用访问、资源整合与持续服务体验打造专业化接入能力。</td>
+</tr>
+<tr>
+<td align="center" valign="middle" width="130"><a href="https://www.recycleai.vip/"><img src="docs/assets/sponsors/recycleai-logo.png" alt="RecycleAI logo" height="28"><br><strong>RecycleAI</strong></a></td>
+<td valign="middle" width="78%">面向 AI 资源复用与智能服务循环的创新平台，致力于提升算力、模型与应用能力之间的协同效率。</td>
+</tr>
+<tr>
+<td align="center" valign="middle" width="130"><a href="https://www.xiongxiongai.online"><img src="docs/assets/sponsors/xiongxiongai-logo.png" alt="熊熊AI logo" height="30"><br><strong>熊熊AI</strong></a></td>
+<td valign="middle" width="78%">以亲和体验、稳定接入和轻量化智能工具为核心的 AI 服务品牌，为用户提供更顺手、更可靠的智能应用入口。</td>
+</tr>
+<tr>
+<td align="center" valign="middle" width="130"><a href="https://console.qqqrouter.ai"><img src="docs/assets/sponsors/qqqrouter-logo.png" alt="qqqRouter logo" height="24"><br><strong>qqqRouter</strong></a></td>
+<td valign="middle" width="78%">面向多模型接入、请求路由与用量治理的 AI 基础设施平台，帮助团队构建更灵活、更可控的模型调用链路。</td>
+</tr>
+<tr>
+<td align="center" valign="middle" width="130"><a href="https://sparkcode.top"><img src="docs/assets/sponsors/sparkcode-logo.png" alt="SparkCode logo" height="30"><br><strong>SparkCode</strong></a></td>
+<td valign="middle" width="78%">稳定高效的 API 中转服务商，提供 Claude Code、Codex、Gemini（含 NanoBanana 系列模型）等主流 AI 编程模型接入；支持包月与按量计费、高并发调用、充值开票、企业专属对接与技术支持，并提供长期有效的邀请返佣福利。</td>
+</tr>
+</tbody>
+</table>
+
 ## 项目概览
 
 TransitHub 是一个自部署的后台运营中心，用于管理多个上游站点和管理员工作区。它关注真实运营工作流：连接上游平台、追踪余额和分组倍率、查看仪表盘指标、配置通知，并运行可定时恢复原倍率的分组活动调价。

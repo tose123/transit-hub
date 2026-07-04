@@ -23,6 +23,39 @@ Please read the following carefully before using this project:
 - **Self-hosting responsibility**: You are responsible for protecting admin credentials, database backups, network access, and deployment secrets in your own environment.
 - **Disclaimer**: This project is for technical learning only. You are responsible for complying with applicable laws and upstream platform policies. The authors assume no liability for service interruptions, account restrictions, data loss, or any direct or indirect damages caused by using this project.
 
+## Sponsors
+
+<table>
+<thead>
+<tr>
+<th align="center" valign="middle" width="30%">Name</th>
+<th align="left" valign="middle" width="70%">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="center" valign="middle" width="30%"><a href="https://www.recycleai.vip/"><img src="docs/assets/sponsors/recycleai-logo.png" alt="RecycleAI logo" height="28"><br><strong>RecycleAI</strong></a></td>
+<td valign="middle" width="70%">An innovation platform for AI resource reuse and intelligent service circulation, improving coordination across compute, model, and application capabilities.</td>
+</tr>
+<tr>
+<td align="center" valign="middle" width="30%"><a href="https://www.xiongxiongai.online"><img src="docs/assets/sponsors/xiongxiongai-logo.png" alt="XiongXiongAI logo" height="30"><br><strong>XiongXiongAI</strong></a></td>
+<td valign="middle" width="70%">An AI service brand centered on approachable experiences, stable access, and lightweight intelligent tools for reliable everyday usage.</td>
+</tr>
+<tr>
+<td align="center" valign="middle" width="30%"><a href="https://console.qqqrouter.ai"><img src="docs/assets/sponsors/qqqrouter-logo.png" alt="qqqRouter logo" height="24"><br><strong>qqqRouter</strong></a></td>
+<td valign="middle" width="70%">An AI infrastructure platform for multi-model access, request routing, and usage governance, helping teams build more flexible and controllable model invocation workflows.</td>
+</tr>
+<tr>
+<td align="center" valign="middle" width="30%"><a href="https://sparkcode.top"><img src="docs/assets/sponsors/sparkcode-logo.png" alt="SparkCode logo" height="30"><br><strong>SparkCode</strong></a></td>
+<td valign="middle" width="70%">A stable and efficient API relay provider for mainstream AI coding models including Claude Code, Codex, and Gemini with NanoBanana-series models; supports monthly plans, usage-based billing, high-concurrency calls, invoiced top-ups, dedicated enterprise onboarding, technical support, and a long-term invitation rebate program.</td>
+</tr>
+<tr>
+<td align="center" valign="middle" width="30%"><a href="https://web.ymocode.com"><img src="docs/assets/sponsors/yimous.png" alt="Yimo-US logo" height="22"><br><strong>Yimo-US</strong></a></td>
+<td valign="middle" width="70%">An API service brand focused on stable access and multi-upstream aggregation, designed for high-availability access, resource integration, and consistent service experiences.</td>
+</tr>
+</tbody>
+</table>
+
 ## Overview
 
 TransitHub is a self-hosted admin and operations hub for managing multiple upstream sites and admin workspaces. It focuses on practical operator workflows: connecting upstream platforms, tracking balances and group multipliers, monitoring dashboard metrics, configuring notifications, and running scheduled group-rate campaigns that can automatically restore original multipliers after an activity ends.
