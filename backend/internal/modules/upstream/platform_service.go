@@ -1999,3 +1999,112 @@ func (s *PlatformService) updateNewAPIGroupRatio(session Session, groupName stri
 	}
 	return nil
 }
+
+// UpdateNewAPIChannelWeightStatus 更新 admin new-api 站点指定 channel 的权重和启用状态。
+// 供 connection_health 模块的自动降级/恢复动作使用：降级时 weight=0/status=2（禁用），
+// 恢复时按策略的 recovery_step_percent 逐步调高 weight 并在权重恢复到位后把 status 设回 1。
+// 采用与 updateSub2APIAdminGroupMultiplier 一致的 GET+PUT-merge 手法：先 GET 单个 channel
+// 详情复制原始字段，仅替换 weight/status 后整体 PUT 回去，避免覆盖 key/base_url/group 等字段。
+// 若 GET 失败（接口不存在、权限不足或 channel 已被删除），直接把错误透传给调用方，
+// 调用方应记录为 remote_action=unsupported 并停止后续动作，不做任何猜测性的 PUT 请求。
+func (s *PlatformService) UpdateNewAPIChannelWeightStatus(session Session, channelID string, weight int, status int) error {
+	if session.Platform != PlatformNewAPI {
+		return newRequestError(ErrorAuth, PlatformNewAPI)
+	}
+	cookieOptions := requestOptions{Cookie: session.Cookie, UserID: session.UserID}
+
+	getURL := session.BaseURL + "/api/channel/" + channelID
+	response, err := s.httpClient.requestJSON(getURL, cookieOptions)
+	if err != nil {
+		return err
+	}
+	data := dataRecord(response.Payload)
+	if len(data) == 0 {
+		return newRequestError(ErrorInvalidResponse, PlatformNewAPI)
+	}
+
+	channel := map[string]any{
+		"weight": weight,
+		"status": status,
+	}
+	for _, key := range []string{"id", "type", "key", "name", "base_url", "models", "group", "priority", "auto_ban", "model_mapping", "tag", "setting", "param_override", "header_override"} {
+		if v, ok := data[key]; ok {
+			channel[key] = v
+		}
+	}
+	if _, ok := channel["id"]; !ok {
+		// GET 响应缺少 id 字段时兜底：new-api channel id 是数值型，按数字解析后回填，
+		// 避免把字符串 channelID 直接序列化成 JSON 字符串导致后端 ShouldBindJSON 绑定失败。
+		if idNum, err := strconv.ParseInt(channelID, 10, 64); err == nil {
+			channel["id"] = idNum
+		} else {
+			channel["id"] = channelID
+		}
+	}
+
+	// new-api 的 UpdateChannel 用 ShouldBindJSON(&PatchChannel) 直接绑定请求体，
+	// 字段必须在 JSON 顶层，不能像 CreateNewAPIChannel 那样包一层 "channel"。
+	_, err = s.httpClient.requestJSON(session.BaseURL+"/api/channel/", requestOptions{
+		Cookie: session.Cookie,
+		UserID: session.UserID,
+		Method: http.MethodPut,
+		Body:   channel,
+	})
+	return err
+}
+
+// UpdateSub2APIAdminAccountStatus 通过 GET+PUT /api/v1/admin/accounts/:id 更新 sub2api 转发账号的
+// 启用状态（"active"/"inactive"），供 connection_health 模块的自动降级/恢复动作使用。
+// 采用与 UpdateNewAPIChannelWeightStatus / updateSub2APIAdminGroupMultiplier 一致的 GET+PUT-merge
+// 手法：先 GET 账号详情复制原始字段，仅替换 status 后整体 PUT 回去，避免覆盖 credentials/
+// group_ids/priority/concurrency/rate_multiplier/load_factor 等字段（PUT-merge 而不是直接发送
+// {"status": "..."}，因为尚未确认 sub2api UpdateAccountRequest 支持 partial patch 语义）。
+// 若 GET 失败（接口不存在、权限不足或账号已被删除），直接把错误透传给调用方，调用方应记录为
+// remote_action=unsupported 并停止后续动作，不做任何猜测性的 PUT 请求。
+// 明文 credentials 只是原样透传（从 GET 响应直接搬到 PUT 请求体），本方法不解析、不记录其内容。
+func (s *PlatformService) UpdateSub2APIAdminAccountStatus(session Session, accountID string, status string) error {
+	if session.Platform != PlatformSub2API || strings.TrimSpace(session.AccessToken) == "" {
+		return newRequestError(ErrorAuth, PlatformSub2API)
+	}
+	if strings.TrimSpace(accountID) == "" {
+		return newRequestError(ErrorInvalidResponse, PlatformSub2API)
+	}
+	authOptions := requestOptions{AccessToken: session.AccessToken, TokenType: session.TokenType}
+
+	getURL := session.BaseURL + "/api/v1/admin/accounts/" + url.PathEscape(accountID)
+	response, err := s.httpClient.requestJSON(getURL, authOptions)
+	if err != nil {
+		return err
+	}
+	data := dataRecord(response.Payload)
+	if len(data) == 0 {
+		return newRequestError(ErrorInvalidResponse, PlatformSub2API)
+	}
+
+	payload := map[string]any{
+		"status": status,
+	}
+	for _, key := range []string{
+		"name", "notes", "type", "credentials", "extra", "proxy_id",
+		"concurrency", "priority", "rate_multiplier", "load_factor",
+		"expires_at", "auto_pause_on_expired", "confirm_mixed_channel_risk",
+	} {
+		if v, ok := data[key]; ok {
+			payload[key] = v
+		}
+	}
+	// group_ids 需要单独解析并保留原始元素类型（数字仍是数字）：sub2api 线上已确认 PUT 传
+	// 字符串化的 group_ids（如 ["50"]）会返回 400，必须和 GET 响应的原始类型一致（如 [50]）。
+	// 解析不到任何分组 ID 时完全不带这个字段，避免用空数组覆盖账号已有的分组绑定。
+	if groupIDs := resolveSub2APIAccountGroupIDsForPayload(data); len(groupIDs) > 0 {
+		payload["group_ids"] = groupIDs
+	}
+
+	_, err = s.httpClient.requestJSON(getURL, requestOptions{
+		AccessToken: session.AccessToken,
+		TokenType:   session.TokenType,
+		Method:      http.MethodPut,
+		Body:        payload,
+	})
+	return err
+}

@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch, type Component } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { Landmark, Layers, Loader2, Lock, PiggyBank, RefreshCw, ShieldCheck, ShoppingCart, TrendingUp, Wallet } from 'lucide-vue-next'
 import StatCard from '../components/dashboard/StatCard.vue'
 import MetricTrendCard from '../components/dashboard/MetricTrendCard.vue'
 import AdminLoginModal from '../components/dashboard/AdminLoginModal.vue'
 import BalanceFilterModal from '../components/dashboard/BalanceFilterModal.vue'
-import GroupListModal from '../components/dashboard/GroupListModal.vue'
 import GroupUsageTodayModal from '../components/dashboard/GroupUsageTodayModal.vue'
 import UpstreamKeyUsageTodayModal from '../components/dashboard/UpstreamKeyUsageTodayModal.vue'
 import UpstreamBalanceBreakdownModal from '../components/dashboard/UpstreamBalanceBreakdownModal.vue'
@@ -20,6 +20,7 @@ import type { DashboardMetricKey, DashboardPeriod } from '../types/dashboard'
 import type { DashboardAdminPlatform, Sub2apiAuthMethod } from '../types/dashboardAdmin'
 
 const { t } = useI18n()
+const router = useRouter()
 const { metrics, loading: metricsLoading, error: metricsError, fetchMetrics, applyRawData } = useDashboardMetrics()
 
 // 仪表盘 admin 登录门禁：进入页面即检查是否已登录 admin，未登录则弹窗。
@@ -52,9 +53,8 @@ const closeBalanceFilter = () => { balanceFilterOpen.value = false }
 const onBalanceFilterSaved = () => { void fetchMetrics() }
 
 const groupCount = ref<number | null>(null)
-const groupListOpen = ref(false)
-const openGroupList = () => { groupListOpen.value = true }
-const closeGroupList = () => { groupListOpen.value = false }
+// “我的分组”卡片不再打开弹窗，改为跳转到独立的分组关联页面。
+const openGroupList = () => { router.push({ name: 'AdminGroupAssociations' }) }
 
 // 今日营收分组明细弹窗：数据只在弹窗打开时按需请求，不参与 metrics 批量拉取。
 const groupUsageTodayOpen = ref(false)
@@ -409,12 +409,6 @@ const charts = computed(() =>
       :open="balanceFilterOpen"
       @close="closeBalanceFilter"
       @saved="onBalanceFilterSaved"
-    />
-
-    <!-- 管理员站点分组列表弹窗 -->
-    <GroupListModal
-      :open="groupListOpen"
-      @close="closeGroupList"
     />
 
     <!-- 今日营收分组明细弹窗 -->
