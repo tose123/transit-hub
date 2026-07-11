@@ -1,0 +1,211 @@
+name: 发布 Docker 镜像（GHCR，原生 amd64 + arm64）
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要构建的既有标签（例如 v1.0.0）'
+        required: true
+        type: string
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  build_single_arch:
+    name: 构建并推送（${{ matrix.arch }}）
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - name: 检出标签
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: 解析并验证标签
+        id: version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG="$GITHUB_REF_NAME"
+          fi
+
+          case "$TAG" in
+            v*) ;;
+            *)
+              echo "::error::标签 '$TAG' 必须以 v 开头"
+              exit 1
+              ;;
+          esac
+
+          if ! git rev-parse --verify "refs/tags/${TAG}^{commit}" >/dev/null 2>&1; then
+            echo "::error::标签 '$TAG' 不存在"
+            exit 1
+          fi
+
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$(git rev-parse "refs/tags/${TAG}^{commit}")" >> "$GITHUB_OUTPUT"
+          echo "正在构建 ${TAG}（${{ matrix.arch }}）"
+
+      - name: 准备 GHCR 镜像地址
+        id: registry
+        run: echo "repository=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: 配置 Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: 登录 GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 准备架构镜像标签
+        id: tags
+        env:
+          ARCH: ${{ matrix.arch }}
+          IMAGE: ${{ steps.registry.outputs.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          {
+            echo 'value<<EOF'
+            echo "${IMAGE}:${TAG}-${ARCH}"
+            echo "${IMAGE}:latest-${ARCH}"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 构建并推送架构镜像
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: true
+          tags: ${{ steps.tags.outputs.value }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.version.outputs.source_sha }}
+            org.opencontainers.image.version=${{ steps.version.outputs.tag }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+          provenance: mode=max
+          sbom: true
+
+      - name: 安装 cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+
+      - name: 签名架构镜像
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ steps.registry.outputs.repository }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: 输出架构镜像摘要
+        env:
+          ARCH: ${{ matrix.arch }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ steps.registry.outputs.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          printf "### Docker 镜像摘要（%s）\n\n\`%s:%s-%s\`\n\n\`%s\`\n" \
+            "$ARCH" "$IMAGE" "$TAG" "$ARCH" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+
+  create_manifests:
+    name: 创建并推送多架构 manifest
+    needs: build_single_arch
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - name: 解析标签
+        id: version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG="$GITHUB_REF_NAME"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: 准备 GHCR 镜像地址
+        id: registry
+        run: echo "repository=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: 登录 GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 创建版本 manifest
+        env:
+          IMAGE: ${{ steps.registry.outputs.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          docker buildx imagetools create \
+            --tag "${IMAGE}:${TAG}" \
+            "${IMAGE}:${TAG}-amd64" \
+            "${IMAGE}:${TAG}-arm64"
+
+      - name: 创建 latest manifest
+        env:
+          IMAGE: ${{ steps.registry.outputs.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          docker buildx imagetools create \
+            --tag "${IMAGE}:latest" \
+            "${IMAGE}:${TAG}-amd64" \
+            "${IMAGE}:${TAG}-arm64"
+
+      - name: 安装 cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+
+      - name: 签名多架构 manifest
+        env:
+          IMAGE: ${{ steps.registry.outputs.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: cosign sign --yes "${IMAGE}:${TAG}"
+
+      - name: 输出多架构 manifest
+        env:
+          IMAGE: ${{ steps.registry.outputs.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          {
+            echo '### 多架构 manifest'
+            echo
+            echo '```text'
+            docker buildx imagetools inspect "${IMAGE}:${TAG}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
