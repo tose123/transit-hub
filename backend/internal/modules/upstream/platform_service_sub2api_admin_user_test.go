@@ -3,6 +3,8 @@ package upstream
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -56,6 +58,162 @@ func TestFetchSub2APIAdminUser_RequestPathAndAuthHeader(t *testing.T) {
 	wantTime := time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC)
 	if user.CreatedAt == nil || !user.CreatedAt.Equal(wantTime) {
 		t.Fatalf("expected createdAt %v, got %+v", wantTime, user.CreatedAt)
+	}
+}
+
+func TestFetchSub2APIAdminUsersPage_RequestQueryAuthAndParsing(t *testing.T) {
+	var gotPath, gotAuth string
+	var gotQuery url.Values
+	var gotRawQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		gotQuery = r.URL.Query()
+		gotRawQuery = r.URL.RawQuery
+		writeJSON(w, map[string]any{
+			"data": map[string]any{
+				"items": []map[string]any{
+					{"id": "42", "email": "user@example.com", "username": "alice", "role": "admin", "status": "active", "created_at": "2025-01-02T03:04:05Z"},
+					{"id": "", "email": "ignored@example.com"},
+				},
+				"total":     101,
+				"page":      1,
+				"page_size": 100,
+				"pages":     2,
+			},
+		})
+	}))
+	defer server.Close()
+
+	service := NewPlatformService(NewHTTPClient(server.Client()))
+	session := Session{Platform: PlatformSub2API, BaseURL: server.URL, AccessToken: "admin-token", TokenType: "Bearer"}
+	page, err := service.FetchSub2APIAdminUsersPage(session, Sub2APIAdminUsersQuery{
+		Page: -2, PageSize: 500, Status: "active", Role: "admin", Search: " alice+notes & keys ", SortBy: "not_allowed", SortOrder: "sideways", Timezone: "Asia/Shanghai",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotPath != "/api/v1/admin/users" {
+		t.Fatalf("expected path /api/v1/admin/users, got %q", gotPath)
+	}
+	if gotAuth != "Bearer admin-token" {
+		t.Fatalf("expected Bearer auth, got %q", gotAuth)
+	}
+	assertQueryValue(t, gotQuery, "include_subscriptions", "true")
+	assertQueryValue(t, gotQuery, "page", "1")
+	assertQueryValue(t, gotQuery, "page_size", "100")
+	assertQueryValue(t, gotQuery, "status", "active")
+	assertQueryValue(t, gotQuery, "role", "admin")
+	assertQueryValue(t, gotQuery, "search", "alice+notes & keys")
+	if !strings.Contains(gotRawQuery, "search=alice%2Bnotes+%26+keys") {
+		t.Fatalf("expected encoded search in raw query, got %q", gotRawQuery)
+	}
+	assertQueryValue(t, gotQuery, "timezone", "Asia/Shanghai")
+	assertQueryValue(t, gotQuery, "sort_by", "created_at")
+	assertQueryValue(t, gotQuery, "sort_order", "desc")
+	if page.Total != 101 || page.Page != 1 || page.PageSize != 100 || page.Pages != 2 {
+		t.Fatalf("unexpected pagination: %+v", page)
+	}
+	if !page.TotalKnown || !page.PagesKnown {
+		t.Fatalf("expected explicit upstream pagination metadata to be marked known: %+v", page)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("expected blank-id item to be skipped, got %+v", page.Items)
+	}
+	wantTime := time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC)
+	item := page.Items[0]
+	if item.ID != "42" || item.Email != "user@example.com" || item.Username != "alice" || item.Role != "admin" || item.Status != "active" {
+		t.Fatalf("unexpected parsed item: %+v", item)
+	}
+	if item.CreatedAt == nil || !item.CreatedAt.Equal(wantTime) {
+		t.Fatalf("expected createdAt %v, got %+v", wantTime, item.CreatedAt)
+	}
+}
+
+func TestFetchSub2APIAdminUsersPage_UsesNormalizedPaginationFallback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{
+			"data": map[string]any{
+				"items": []map[string]any{{"id": "1", "email": "user@example.com"}},
+			},
+		})
+	}))
+	defer server.Close()
+
+	service := NewPlatformService(NewHTTPClient(server.Client()))
+	session := Session{Platform: PlatformSub2API, BaseURL: server.URL, AccessToken: "admin-token", TokenType: "Bearer"}
+	page, err := service.FetchSub2APIAdminUsersPage(session, Sub2APIAdminUsersQuery{Page: -2, PageSize: 500})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if page.Page != 1 || page.PageSize != 100 {
+		t.Fatalf("expected normalized fallback page=1 pageSize=100, got %+v", page)
+	}
+}
+
+func TestFetchSub2APIAdminUsersPage_OmitsEmptySearch(t *testing.T) {
+	var gotQuery url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		writeJSON(w, map[string]any{"data": map[string]any{"items": []map[string]any{}, "total": 0, "page": 1, "page_size": 20, "pages": 0}})
+	}))
+	defer server.Close()
+
+	service := NewPlatformService(NewHTTPClient(server.Client()))
+	session := Session{Platform: PlatformSub2API, BaseURL: server.URL, AccessToken: "admin-token", TokenType: "Bearer"}
+	_, err := service.FetchSub2APIAdminUsersPage(session, Sub2APIAdminUsersQuery{Page: 1, PageSize: 20, Search: " \t\n "})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := gotQuery["search"]; ok {
+		t.Fatalf("expected empty search to be omitted, full query=%v", gotQuery)
+	}
+}
+
+func TestFetchSub2APIAdminUsersPage_MarksMissingPaginationUnknown(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"data": map[string]any{"items": []map[string]any{{"id": "1", "email": "a@example.com"}}}})
+	}))
+	defer server.Close()
+
+	service := NewPlatformService(NewHTTPClient(server.Client()))
+	session := Session{Platform: PlatformSub2API, BaseURL: server.URL, AccessToken: "admin-token", TokenType: "Bearer"}
+	page, err := service.FetchSub2APIAdminUsersPage(session, Sub2APIAdminUsersQuery{Page: 1, PageSize: 100})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if page.TotalKnown || page.PagesKnown {
+		t.Fatalf("expected missing upstream pagination metadata to remain unknown: %+v", page)
+	}
+	if page.Total != 1 || page.Pages != 0 {
+		t.Fatalf("unexpected fallback pagination values: %+v", page)
+	}
+}
+
+func TestFetchSub2APIAdminUsersPage_AllowsKnownSortAndAscendingOrder(t *testing.T) {
+	var gotQuery url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		writeJSON(w, map[string]any{"data": map[string]any{"items": []map[string]any{}, "total": 0, "page": 3, "page_size": 20, "pages": 0}})
+	}))
+	defer server.Close()
+
+	service := NewPlatformService(NewHTTPClient(server.Client()))
+	session := Session{Platform: PlatformSub2API, BaseURL: server.URL, AccessToken: "admin-token", TokenType: "Bearer"}
+	_, err := service.FetchSub2APIAdminUsersPage(session, Sub2APIAdminUsersQuery{Page: 3, PageSize: 20, SortBy: "email", SortOrder: "asc"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertQueryValue(t, gotQuery, "sort_by", "email")
+	assertQueryValue(t, gotQuery, "sort_order", "asc")
+	assertQueryValue(t, gotQuery, "page", "3")
+	assertQueryValue(t, gotQuery, "page_size", "20")
+}
+
+func assertQueryValue(t *testing.T, values url.Values, key string, want string) {
+	t.Helper()
+	if got := values.Get(key); got != want {
+		t.Fatalf("query %s = %q, want %q; full query=%v", key, got, want, values)
 	}
 }
 

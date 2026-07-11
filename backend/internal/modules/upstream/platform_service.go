@@ -2118,6 +2118,138 @@ var (
 	sub2APIBalanceHistoryTimeKeys = []string{"created_at", "createdAt"}
 )
 
+var sub2APIAdminUsersSortKeys = map[string]struct{}{
+	"created_at": {},
+	"email":      {},
+	"username":   {},
+	"status":     {},
+	"role":       {},
+}
+
+// FetchSub2APIAdminUsersPage 透传 Sub2API admin 用户列表。查询参数只允许分页、status/role、search、排序和时区，
+// 其中 search 会先做空白裁剪并限制为 100 个 Unicode rune，然后再写入 url.Values，避免 handler 直接拼接 URL
+// 或把任意客户端参数转发到上游。
+func (s *PlatformService) FetchSub2APIAdminUsersPage(session Session, query Sub2APIAdminUsersQuery) (Sub2APIAdminUsersPage, error) {
+	if session.Platform != PlatformSub2API || strings.TrimSpace(session.AccessToken) == "" {
+		return Sub2APIAdminUsersPage{}, newRequestError(ErrorAuth, PlatformSub2API)
+	}
+	query = normalizeSub2APIAdminUsersQuery(query)
+	values := sanitizeSub2APIAdminUsersValues(query)
+	requestURL := session.BaseURL + "/api/v1/admin/users?" + values.Encode()
+	response, err := s.httpClient.requestJSON(requestURL, requestOptions{AccessToken: session.AccessToken, TokenType: session.TokenType})
+	if err != nil {
+		return Sub2APIAdminUsersPage{}, err
+	}
+	return parseSub2APIAdminUsersPage(response.Payload, query), nil
+}
+
+func sanitizeSub2APIAdminUsersValues(query Sub2APIAdminUsersQuery) url.Values {
+	query = normalizeSub2APIAdminUsersQuery(query)
+	values := url.Values{}
+	values.Set("page", strconv.Itoa(query.Page))
+	values.Set("page_size", strconv.Itoa(query.PageSize))
+	values.Set("sort_by", query.SortBy)
+	values.Set("sort_order", query.SortOrder)
+	values.Set("include_subscriptions", "true")
+	if query.Status != "" {
+		values.Set("status", query.Status)
+	}
+	if query.Role != "" {
+		values.Set("role", query.Role)
+	}
+	if query.Search != "" {
+		values.Set("search", query.Search)
+	}
+	if query.Timezone != "" {
+		values.Set("timezone", query.Timezone)
+	}
+	return values
+}
+
+// normalizeSub2APIAdminUsersQuery creates the exact query contract used both
+// for the outbound request and for pagination fallbacks when upstream omits
+// metadata. Keeping one normalized value prevents response metadata from
+// disagreeing with the page and page_size that were actually requested.
+func normalizeSub2APIAdminUsersQuery(query Sub2APIAdminUsersQuery) Sub2APIAdminUsersQuery {
+	if query.Page < 1 {
+		query.Page = 1
+	}
+	if query.PageSize < 1 {
+		query.PageSize = 20
+	}
+	if query.PageSize > 100 {
+		query.PageSize = 100
+	}
+	query.Status = strings.TrimSpace(query.Status)
+	query.Role = strings.TrimSpace(query.Role)
+	query.Search = normalizeSub2APIAdminUsersSearch(query.Search)
+	query.SortBy = strings.TrimSpace(query.SortBy)
+	if _, ok := sub2APIAdminUsersSortKeys[query.SortBy]; !ok {
+		query.SortBy = "created_at"
+	}
+	query.SortOrder = strings.ToLower(strings.TrimSpace(query.SortOrder))
+	if query.SortOrder != "asc" {
+		query.SortOrder = "desc"
+	}
+	query.Timezone = strings.TrimSpace(query.Timezone)
+	return query
+}
+
+func normalizeSub2APIAdminUsersSearch(value string) string {
+	trimmed := strings.TrimSpace(value)
+	runes := []rune(trimmed)
+	if len(runes) > 100 {
+		return string(runes[:100])
+	}
+	return trimmed
+}
+
+func parseSub2APIAdminUsersPage(payload any, fallback Sub2APIAdminUsersQuery) Sub2APIAdminUsersPage {
+	itemsRaw := dataArray(payload)
+	items := make([]Sub2APIAdminUser, 0, len(itemsRaw))
+	for _, raw := range itemsRaw {
+		item := parseSub2APIAdminUser(raw)
+		if item.ID != "" {
+			items = append(items, item)
+		}
+	}
+	data := dataRecord(payload)
+	page := intFromRecord(data, []string{"page"}, fallback.Page)
+	pageSize := intFromRecord(data, []string{"page_size", "pageSize"}, fallback.PageSize)
+	total, totalKnown := intFromRecordOK(data, []string{"total", "count"})
+	if !totalKnown {
+		total = len(items)
+	}
+	pages, pagesKnown := intFromRecordOK(data, []string{"pages", "total_pages", "totalPages"})
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = len(items)
+		if pageSize < 1 {
+			pageSize = 20
+		}
+	}
+	if pages < 1 && pageSize > 0 && totalKnown {
+		pages = int(math.Ceil(float64(total) / float64(pageSize)))
+	}
+	return Sub2APIAdminUsersPage{Items: items, Total: total, Page: page, PageSize: pageSize, Pages: pages, TotalKnown: totalKnown, PagesKnown: pagesKnown || (totalKnown && pages > 0)}
+}
+
+func intFromRecord(record map[string]any, keys []string, fallback int) int {
+	if value, ok := intFromRecordOK(record, keys); ok {
+		return value
+	}
+	return fallback
+}
+
+func intFromRecordOK(record map[string]any, keys []string) (int, bool) {
+	if number := firstNumber(record, keys); number != nil {
+		return int(*number), true
+	}
+	return 0, false
+}
+
 // FetchSub2APIAdminUser 通过 GET /api/v1/admin/users/:id 查询指定 Sub2API 用户的只读资料，
 // 仅用于工单模块"Sub2API 用户资料"弹窗展示，绝不写入/修改 Sub2API 数据。调用方必须传入
 // 当前 TransitHub workspace 的 admin session（已经过 RequireSession 刷新并校验过 admin 身份），
