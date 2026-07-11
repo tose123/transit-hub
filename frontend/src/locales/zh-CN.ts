@@ -109,7 +109,9 @@ export default {
       toggleLanguage: '切换语言',
       toggleTheme: '切换主题',
       userProfile: '用户资料',
-      switchWorkspace: '切换工作区'
+      switchWorkspace: '切换工作区',
+      openNavigation: '打开导航',
+      closeNavigation: '关闭导航'
     },
     menu: {
       dashboard: '仪表盘',
@@ -121,6 +123,7 @@ export default {
       groupRateCampaigns: '活动调价',
       settings: '系统设置',
       tickets: '工单',
+      massEmail: '群发邮件',
       signOut: '退出登录'
     },
     adminAccounts: {
@@ -1330,6 +1333,156 @@ export default {
         }
       }
     },
+    massEmail: {
+      common: {
+        placeholder: '-'
+      },
+      filters: {
+        search: '搜索用户',
+        searchPlaceholder: '输入邮箱关键词',
+        noSearch: '未设置搜索词',
+        status: '用户状态',
+        role: '角色',
+        allStatuses: '全部状态',
+        allRoles: '全部角色'
+      },
+      template: {
+        label: '邮件模板',
+        placeholder: '选择模板',
+        noSubject: '尚未选择主题'
+      },
+      selection: {
+        title: '收件人选择',
+        count: '跨页已选择 {count} 个',
+        selectPage: '选择当前页全部用户',
+        selectUser: '选择 {email}'
+      },
+      users: {
+        title: '收件人'
+      },
+      fields: {
+        email: '邮箱',
+        role: '角色',
+        status: '状态',
+        createdAt: '创建时间',
+        actions: '操作'
+      },
+      roles: {
+        user: '普通用户',
+        admin: '管理员'
+      },
+      userStatus: {
+        active: '正常',
+        disabled: '已禁用',
+        inactive: '未激活',
+        banned: '已封禁'
+      },
+      actions: {
+        search: '搜索',
+        clearSearch: '清空搜索',
+        refresh: '刷新',
+        clearSelection: '清空',
+        sendSelected: '发送所选',
+        sendPage: '发送当前页',
+        sendFilter: '发送当前筛选',
+        sendRow: '发送',
+        cancelBatch: '取消',
+        closeConfirm: '关闭确认框',
+        openBatches: '批次',
+        openBatchDetail: '详情',
+        previewTemplate: '预览'
+      },
+      status: {
+        loadingUsers: '正在加载收件人...',
+        loadingItems: '正在加载发送结果...'
+      },
+      batchStatus: {
+        queued: '排队中',
+        running: '发送中',
+        completed: '已完成',
+        completed_with_errors: '已完成但有错误',
+        failed: '失败',
+        cancelled: '已取消',
+        cancelling: '取消中'
+      },
+      itemStatus: {
+        pending: '待发送',
+        sending: '发送中',
+        sent: '已发送',
+        failed: '失败',
+        uncertain: '结果不确定',
+        cancelled: '已取消'
+      },
+      empty: {
+        usersTitle: '当前筛选下没有收件人',
+        usersDescription: '调整搜索关键词、状态或角色筛选后重试。',
+        batches: '暂无群发邮件批次。',
+        detail: '选择一个批次查看收件人发送结果。'
+      },
+      pagination: {
+        total: '共 {total} 个',
+        pageSize: '每页 {pageSize} 条',
+        currentPage: '第 {page} / {totalPages} 页',
+        previous: '上一页',
+        next: '下一页'
+      },
+      batches: {
+        title: '批次',
+        active: '{count} 个进行中',
+        progress: '已处理 {done}/{total}，{percent}%',
+        close: '关闭批次列表'
+      },
+      detail: {
+        title: '批次详情',
+        recipients: '共 {total} 个收件人结果',
+        close: '关闭批次详情'
+      },
+      preview: {
+        title: '模板预览',
+        close: '关闭预览',
+        iframeTitle: '邮件模板预览'
+      },
+      summary: {
+        sent: '已发送',
+        failed: '失败',
+        uncertain: '不确定',
+        cancelled: '已取消'
+      },
+      confirm: {
+        selectedTitle: '向所选收件人发送邮件？',
+        selectedDescription: '将为已选择的 {count} 个收件人创建群发邮件批次。',
+        allTitle: '向当前筛选下全部收件人发送邮件？',
+        allDescription: '将为当前筛选匹配的 {count} 个收件人创建群发邮件批次。',
+        recipients: '收件人：{count} 个',
+        template: '模板：{name}',
+        filters: '筛选：{status}，{role}，搜索：{search}',
+        cancel: '取消',
+        submit: '创建批次'
+      },
+      success: {
+        created: '群发邮件批次已创建。',
+        cancelled: '已请求取消批次。'
+      },
+      errors: {
+        network: '网络或 CORS 请求失败，请检查接口地址与跨域配置。',
+        request: '群发邮件请求失败，请稍后重试。',
+        templates: '加载邮件模板失败。',
+        unknown: '加载群发邮件数据时发生未知错误。',
+        invalidRequest: '群发邮件请求无效。',
+        invalidSelection: '请至少选择一个有效收件人。',
+        templateNotFound: '所选邮件模板不存在。',
+        smtpNotReady: 'SMTP 设置尚未就绪。',
+        upstreamAuth: '上游管理员鉴权失败。',
+        upstreamRequest: '上游请求失败。',
+        notFound: '群发邮件批次不存在。',
+        invalidState: '当前批次状态无法执行该操作。',
+        persistence: '群发邮件数据保存失败。',
+        sendFailed: '邮件发送失败。',
+        activeBatchExists: '当前工作区已有一个进行中的群发批次，请取消或等待完成后再创建。',
+        recipientLimitReached: '本次选择超过 10,000 个收件人上限，请缩小筛选范围后重试。',
+        itemGeneric: '该收件人发送失败，请稍后查看批次获取最新详情。'
+      }
+    },
     settings: {
       title: '系统设置',
       subtitle: '管理系统运行参数、通知渠道及自动化策略。',
@@ -1367,7 +1520,8 @@ export default {
       tabs: {
         strategy: '自动化与策略',
         channels: '通知与渠道',
-        templates: '消息模板'
+        templates: '消息模板',
+        email: '邮件设置'
       },
       sections: {
         basic: {
@@ -1429,6 +1583,79 @@ export default {
         missingWebhook: '请先填写机器人 Webhook 地址。',
         missingTelegramConfig: '请先填写 Telegram Bot Token 和 Chat ID。',
         sendFailed: '测试消息发送失败，请检查机器人配置和网络连通性。'
+      },
+      smtp: {
+        title: 'SMTP 邮件设置',
+        description: '配置用于发送系统邮件的 SMTP 服务器。',
+        host: 'SMTP 主机',
+        port: '端口',
+        tlsMode: 'TLS 模式',
+        tlsStarttls: 'STARTTLS (587)',
+        tlsImplicit: '隐式 TLS (465)',
+        username: '用户名',
+        password: '密码',
+        passwordConfigured: '已保存密码',
+        passwordNotConfigured: '未保存密码',
+        passwordKeepPlaceholder: '留空以保留已保存密码',
+        passwordNewPlaceholder: '输入 SMTP 密码',
+        fromEmail: '发件邮箱',
+        fromName: '发件名称',
+        testRecipient: '测试收件人',
+        saveSuccess: 'SMTP 设置已保存',
+        testEmail: '发送测试邮件',
+        testEmailSuccess: '测试邮件已发送',
+        dirtyBeforeTest: '请先保存当前 SMTP 设置再发送测试邮件',
+        errors: {
+          validation: '请检查 SMTP 设置。',
+          missingConfig: '请先保存 SMTP 设置。',
+          invalidTlsMode: 'TLS 模式无效。',
+          invalidEmail: '邮箱地址无效。',
+          invalidPort: '端口必须是 1-65535 之间的整数。',
+          encryptionKeyUnavailable: '服务器未配置 SMTP 加密密钥。',
+          decryptFailed: '无法读取已保存的 SMTP 密码。',
+          sendFailed: '测试邮件发送失败。',
+          persistence: 'SMTP 设置保存失败。'
+        }
+      },
+      emailTemplates: {
+        title: '邮件模板',
+        description: '创建并维护可复用的 HTML 邮件，每个模板都可以独立测试发送。',
+        library: '模板库',
+        editor: '模板编辑器',
+        add: '新建模板',
+        builtIn: '内置',
+        loading: '正在加载邮件模板...',
+        empty: '暂无可用模板',
+        name: '模板名称',
+        subject: '邮件主题',
+        htmlBody: 'HTML 正文',
+        preview: '邮件预览',
+        code: '查看源码',
+        previewTitle: '邮件模板安全预览',
+        save: '保存模板',
+        delete: '删除',
+        test: '发送测试邮件',
+        testRecipient: '测试收件人',
+        testRecipientPlaceholder: "name{'@'}example.com",
+        unsaved: '有未保存的修改',
+        dirtyBeforeTest: '请先保存模板，再发送测试邮件。',
+        discardConfirm: '当前模板有未保存的修改，确定要放弃吗？',
+        deleteConfirm: '确定删除模板“{name}”吗？此操作无法撤销。',
+        newTemplateName: '自定义模板',
+        newTemplateSubject: '请输入邮件主题',
+        newTemplateHtml: '<div style="font-family:Arial,sans-serif;padding:32px"><h1>在这里填写标题</h1><p>在这里编写邮件内容。</p></div>',
+        createSuccess: '模板已创建',
+        saveSuccess: '模板已保存',
+        deleteSuccess: '模板已删除',
+        testEmailSuccess: '测试邮件已发送',
+        errors: {
+          validation: '请填写模板名称、单行主题和不超过 100KB 的 HTML 正文。',
+          invalidEmail: '测试收件人邮箱无效。',
+          notFound: '邮件模板不存在或已被删除。',
+          builtInProtected: '内置模板不能删除，但可以自由编辑。',
+          limitReached: '最多可创建 50 个自定义模板。',
+          persistence: '邮件模板保存失败，请稍后重试。'
+        }
       }
     },
     system: {

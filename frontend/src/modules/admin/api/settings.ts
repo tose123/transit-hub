@@ -1,8 +1,16 @@
 import type {
+  EmailTemplate,
   NotificationChannelSettings,
+  SaveEmailTemplatePayload,
+  SaveSmtpSettingsPayload,
+  SmtpSettings,
   StrategySettings,
   TestNotificationChannelPayload,
   TestNotificationChannelResponse,
+  TestSmtpEmailPayload,
+  TestSmtpEmailResponse,
+  TestEmailTemplatePayload,
+  TestEmailTemplateResponse,
 } from '../types/settings'
 import {
   authUnauthorizedErrorKey,
@@ -85,5 +93,57 @@ export const saveNotificationChannelSettings = async (
   requestJson<NotificationChannelSettings>('/settings/notification-channels', {
     method: 'PUT',
     body: JSON.stringify(settings),
+  })
+)
+
+export const getEmailTemplates = async (): Promise<EmailTemplate[]> => (
+  requestJson<EmailTemplate[]>('/settings/email-templates')
+)
+
+export const createEmailTemplate = async (payload: SaveEmailTemplatePayload): Promise<EmailTemplate> => (
+  requestJson<EmailTemplate>('/settings/email-templates', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+)
+
+export const updateEmailTemplate = async (id: string, payload: SaveEmailTemplatePayload): Promise<EmailTemplate> => (
+  requestJson<EmailTemplate>(`/settings/email-templates/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+)
+
+export const deleteEmailTemplate = async (id: string): Promise<Record<string, never>> => (
+  requestJson<Record<string, never>>(`/settings/email-templates/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
+)
+
+export const testEmailTemplate = async (
+  id: string,
+  payload: TestEmailTemplatePayload,
+): Promise<TestEmailTemplateResponse> => (
+  requestJson<TestEmailTemplateResponse>(`/settings/email-templates/${encodeURIComponent(id)}/test-email`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+)
+
+export const getSmtpSettings = async (): Promise<SmtpSettings> => (
+  requestJson<SmtpSettings>('/settings/smtp')
+)
+
+export const saveSmtpSettings = async (payload: SaveSmtpSettingsPayload): Promise<SmtpSettings> => (
+  requestJson<SmtpSettings>('/settings/smtp', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+)
+
+export const testSmtpEmail = async (payload: TestSmtpEmailPayload): Promise<TestSmtpEmailResponse> => (
+  requestJson<TestSmtpEmailResponse>('/settings/smtp/test-email', {
+    method: 'POST',
+    body: JSON.stringify(payload),
   })
 )
