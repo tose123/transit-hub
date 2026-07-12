@@ -20,6 +20,7 @@ func TestWorkspaceDeleteStatementsCoverAllWorkspaceTables(t *testing.T) {
 		"ticket_messages",
 		"tickets",
 		"ticket_embed_configs",
+		"leaderboard_embed_configs",
 		"group_rate_snapshots",
 		"strategy_settings",
 		"notification_channel_settings",

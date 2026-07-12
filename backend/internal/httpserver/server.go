@@ -21,6 +21,7 @@ import (
 	"transithub/backend/internal/modules/group_rate_campaigns"
 	"transithub/backend/internal/modules/group_rates"
 	"transithub/backend/internal/modules/health"
+	"transithub/backend/internal/modules/leaderboard"
 	"transithub/backend/internal/modules/mass_email"
 	"transithub/backend/internal/modules/my_sites"
 	"transithub/backend/internal/modules/settings"
@@ -38,10 +39,11 @@ const (
 )
 
 type Server struct {
-	cfg         config.Config
-	mux         *http.ServeMux
-	allowed     map[string]struct{}
-	authService *auth.Service
+	cfg                            config.Config
+	mux                            *http.ServeMux
+	allowed                        map[string]struct{}
+	authService                    *auth.Service
+	leaderboardFrameAncestorOrigin func(ctx context.Context, embedToken string) (string, bool)
 }
 
 func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server {
@@ -107,6 +109,19 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 	ticketsService.SetAdminSessionProvider(mySitesService)
 	ticketsService.SetSub2APIAdminClient(platformService)
 	tickets.RegisterRoutes(server.mux, ticketsService)
+
+	// 排行榜模块：后台接口复用当前 workspace 的 dashboard admin session；公开 embed 接口
+	// 不进入 TransitHub 登录态，由独立 embed token + Sub2API viewer token 换取短期 Redis session。
+	leaderboardRepository := leaderboard.NewRepository(db)
+	leaderboardSessions := leaderboard.NewEmbedSessionStore(redisClient)
+	leaderboardSub2APIClient := leaderboard.NewSub2APIClient(&http.Client{Timeout: upstreamRequestTimeout})
+	leaderboardService := leaderboard.NewService(leaderboardRepository, leaderboardSessions, leaderboardSub2APIClient, platformService, mySitesService)
+	leaderboardService.SetAdminAccountResolver(adminAccountsService)
+	if err := leaderboardService.EnsureSchema(context.Background()); err != nil {
+		panic(err)
+	}
+	server.leaderboardFrameAncestorOrigin = leaderboardService.FrameAncestorOrigin
+	leaderboard.RegisterRoutes(server.mux, leaderboardService)
 
 	settingsService := settings.NewService(http.DefaultClient, settings.NewRepository(db))
 	settingsService.SetAdminAccountResolver(adminAccountsService)
@@ -238,10 +253,11 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 	dashboardService.SetAdminAccountService(adminAccountsService)
 	dashboardService.SetMySiteSync(mySitesService)
 	adminAccountsService.SetWorkspaceCleanup(workspaceCleanup{
-		dashboardSessions: dashboardSessionStore,
-		ticketSessions:    ticketsSessions,
-		attachments:       ticketsStorage,
-		upstreamSites:     upstreamService,
+		dashboardSessions:   dashboardSessionStore,
+		ticketSessions:      ticketsSessions,
+		leaderboardSessions: leaderboardSessions,
+		attachments:         ticketsStorage,
+		upstreamSites:       upstreamService,
 	})
 	adminAccountsService.StartCleanupWorker(context.Background(), time.Minute)
 	dashboardService.StartRefresher(context.Background())
@@ -272,6 +288,10 @@ type ticketEmbedSessionCleaner interface {
 	DeleteWorkspace(ctx context.Context, userID string, adminAccountID string) error
 }
 
+type leaderboardEmbedSessionCleaner interface {
+	DeleteWorkspace(ctx context.Context, userID string, adminAccountID string) error
+}
+
 type attachmentCleaner interface {
 	Delete(storagePath string) error
 }
@@ -281,10 +301,11 @@ type upstreamSiteCleaner interface {
 }
 
 type workspaceCleanup struct {
-	dashboardSessions dashboardSessionCleaner
-	ticketSessions    ticketEmbedSessionCleaner
-	attachments       attachmentCleaner
-	upstreamSites     upstreamSiteCleaner
+	dashboardSessions   dashboardSessionCleaner
+	ticketSessions      ticketEmbedSessionCleaner
+	leaderboardSessions leaderboardEmbedSessionCleaner
+	attachments         attachmentCleaner
+	upstreamSites       upstreamSiteCleaner
 }
 
 func (c workspaceCleanup) CleanupDeletedWorkspace(ctx context.Context, payload admin_accounts.WorkspaceCleanupPayload) error {
@@ -297,6 +318,11 @@ func (c workspaceCleanup) CleanupDeletedWorkspace(ctx context.Context, payload a
 	if c.ticketSessions != nil {
 		if err := c.ticketSessions.DeleteWorkspace(ctx, payload.UserID, payload.AdminAccountID); err != nil {
 			errs = append(errs, fmt.Errorf("ticket embed session cleanup: %w", err))
+		}
+	}
+	if c.leaderboardSessions != nil {
+		if err := c.leaderboardSessions.DeleteWorkspace(ctx, payload.UserID, payload.AdminAccountID); err != nil {
+			errs = append(errs, fmt.Errorf("leaderboard embed session cleanup: %w", err))
 		}
 	}
 	if c.upstreamSites != nil {
@@ -335,6 +361,7 @@ func (s *Server) Handler() http.Handler {
 	static := staticHandler(s.cfg.PublicDir)
 
 	return s.logRequests(s.cors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.setSecurityHeaders(w, r)
 		if !strings.HasPrefix(r.URL.Path, apiPrefix) {
 			static.ServeHTTP(w, r)
 			return
@@ -352,7 +379,24 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) protectedPath(path string) bool {
-	return strings.HasPrefix(path, "/api/admin-accounts") || strings.HasPrefix(path, "/api/upstream-sites") || strings.HasPrefix(path, "/api/group-rates") || strings.HasPrefix(path, "/api/group-rate-campaigns") || strings.HasPrefix(path, "/api/my-sites") || strings.HasPrefix(path, "/api/settings") || strings.HasPrefix(path, "/api/dashboard") || strings.HasPrefix(path, "/api/system") || strings.HasPrefix(path, "/api/connection-health") || strings.HasPrefix(path, "/api/tickets") || strings.HasPrefix(path, "/api/mass-email")
+	return strings.HasPrefix(path, "/api/admin-accounts") || strings.HasPrefix(path, "/api/upstream-sites") || strings.HasPrefix(path, "/api/group-rates") || strings.HasPrefix(path, "/api/group-rate-campaigns") || strings.HasPrefix(path, "/api/my-sites") || strings.HasPrefix(path, "/api/settings") || strings.HasPrefix(path, "/api/dashboard") || strings.HasPrefix(path, "/api/system") || strings.HasPrefix(path, "/api/connection-health") || strings.HasPrefix(path, "/api/tickets") || strings.HasPrefix(path, "/api/leaderboard") || strings.HasPrefix(path, "/api/mass-email")
+}
+
+func (s *Server) setSecurityHeaders(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+	if r.Method == http.MethodGet && r.URL.Path == "/embed/leaderboard" {
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		origin := ""
+		if s.leaderboardFrameAncestorOrigin != nil {
+			origin, _ = s.leaderboardFrameAncestorOrigin(r.Context(), r.URL.Query().Get("embed_token"))
+		}
+		if origin == "" {
+			w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+			return
+		}
+		w.Header().Set("Content-Security-Policy", "frame-ancestors "+origin)
+	}
 }
 
 func bearerToken(header string) string {
@@ -491,6 +535,7 @@ func checkBalanceWarning(ctx context.Context, svc *settings.Service, uSvc *upstr
 // checkMultiplierChanges 对比同步前后的分组倍率，任何变化都发送通知。
 // 只受系统设置全局开关 strategy.EnableMultiplierAlert 控制。
 func checkMultiplierChanges(ctx context.Context, svc *settings.Service, strategy settings.StrategySettings, userID, siteID, siteName string, oldMetrics, newMetrics upstream.Metrics) {
+	_ = siteID
 	if !strategy.EnableMultiplierAlert || len(strategy.MultiplierNotifyBotIDs) == 0 {
 		return
 	}
