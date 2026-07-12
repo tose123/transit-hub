@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -132,9 +133,6 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 		panic(err)
 	}
 	admin_accounts.RegisterRoutes(server.mux, adminAccountsService)
-	if err := upstreamService.RestoreSavedSites(context.Background()); err != nil {
-		panic(err)
-	}
 
 	// 注入机器人通知能力，供自动调价成功后发送通知。
 	mySitesService.SetBotNotifier(settingsService)
@@ -152,7 +150,6 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 	}
 	mass_email.RegisterRoutes(server.mux, massEmailService, adminAccountsService)
 	massEmailWorker := mass_email.NewWorker(massEmailService)
-	massEmailWorker.Start(context.Background())
 
 	// 活动调价中心：批量修改 admin 自有分组倍率的独立模块，不复用/不污染 my_sites 的自动调价逻辑。
 	// mySitesService 提供 admin 会话与分组倍率读写能力，groupRatesService 提供分组类型标签查询，
@@ -175,7 +172,6 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 	}
 	campaignsService.SetAdminAccountResolver(adminAccountsService)
 	group_rate_campaigns.RegisterRoutes(server.mux, campaignsService, adminAccountsService)
-	campaignsService.StartScheduler(context.Background())
 
 	// 分组健康探活模块：数据源为 real_connections（通过 mySitesService 只读接口），
 	// upstreamService 提供站点 base_url/平台类型查询，platformService 提供 new-api 远端降级/恢复能力。
@@ -194,6 +190,17 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 	// 分组下账号/渠道，叠加 real_connections 探活状态。platformService 已实现所需方法。
 	connHealthService.SetPlatformGroupReader(platformService)
 	connection_health.RegisterRoutes(server.mux, connHealthService)
+
+	// 所有 workspace 表 schema 完成后再补 legacy 归属；随后才启动 restore、worker 和 scheduler，
+	// 避免后台任务在旧行尚未补齐 workspace 时读取或写回数据。
+	if err := adminAccountsService.AssignLegacyRows(context.Background()); err != nil {
+		panic(err)
+	}
+	if err := upstreamService.RestoreSavedSites(context.Background()); err != nil {
+		panic(err)
+	}
+	massEmailWorker.Start(context.Background())
+	campaignsService.StartScheduler(context.Background())
 	connHealthService.StartScheduler(context.Background())
 
 	// 策略设置变更时通知上游服务更新定时同步配置。
@@ -230,6 +237,13 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 	dashboardService := dashboard.NewService(dashboardSessionStore, platformService)
 	dashboardService.SetAdminAccountService(adminAccountsService)
 	dashboardService.SetMySiteSync(mySitesService)
+	adminAccountsService.SetWorkspaceCleanup(workspaceCleanup{
+		dashboardSessions: dashboardSessionStore,
+		ticketSessions:    ticketsSessions,
+		attachments:       ticketsStorage,
+		upstreamSites:     upstreamService,
+	})
+	adminAccountsService.StartCleanupWorker(context.Background(), time.Minute)
 	dashboardService.StartRefresher(context.Background())
 
 	// 仪表盘指标服务：实时计算五项核心指标 + 历史趋势快照。
@@ -248,6 +262,59 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 
 type groupRateSnapshotWriter struct {
 	service *group_rates.Service
+}
+
+type dashboardSessionCleaner interface {
+	Delete(ctx context.Context, userID string, adminAccountID string) error
+}
+
+type ticketEmbedSessionCleaner interface {
+	DeleteWorkspace(ctx context.Context, userID string, adminAccountID string) error
+}
+
+type attachmentCleaner interface {
+	Delete(storagePath string) error
+}
+
+type upstreamSiteCleaner interface {
+	CleanupDeletedWorkspaceSites(ctx context.Context, userID string, siteIDs []string) error
+}
+
+type workspaceCleanup struct {
+	dashboardSessions dashboardSessionCleaner
+	ticketSessions    ticketEmbedSessionCleaner
+	attachments       attachmentCleaner
+	upstreamSites     upstreamSiteCleaner
+}
+
+func (c workspaceCleanup) CleanupDeletedWorkspace(ctx context.Context, payload admin_accounts.WorkspaceCleanupPayload) error {
+	var errs []error
+	if c.dashboardSessions != nil {
+		if err := c.dashboardSessions.Delete(ctx, payload.UserID, payload.AdminAccountID); err != nil {
+			errs = append(errs, fmt.Errorf("dashboard session cleanup: %w", err))
+		}
+	}
+	if c.ticketSessions != nil {
+		if err := c.ticketSessions.DeleteWorkspace(ctx, payload.UserID, payload.AdminAccountID); err != nil {
+			errs = append(errs, fmt.Errorf("ticket embed session cleanup: %w", err))
+		}
+	}
+	if c.upstreamSites != nil {
+		if err := c.upstreamSites.CleanupDeletedWorkspaceSites(ctx, payload.UserID, payload.UpstreamSiteIDs); err != nil {
+			errs = append(errs, fmt.Errorf("upstream site cleanup: %w", err))
+		}
+	}
+	if c.attachments != nil {
+		for _, path := range payload.AttachmentStoragePaths {
+			if strings.TrimSpace(path) == "" {
+				continue
+			}
+			if err := c.attachments.Delete(path); err != nil {
+				errs = append(errs, fmt.Errorf("ticket attachment cleanup %q: %w", path, err))
+			}
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (w groupRateSnapshotWriter) SaveSiteSnapshot(ctx context.Context, userID string, adminAccountID string, siteID string, siteName string, sitePlatform upstream.Platform, groups []upstream.SnapshotGroup) error {
