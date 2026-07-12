@@ -115,6 +115,7 @@ export default {
     },
     menu: {
       dashboard: 'Dashboard',
+      leaderboard: 'Leaderboard',
       upstream: 'Upstream',
       groupManagement: 'Group Management',
       groupRates: 'Group Rates',
@@ -125,6 +126,42 @@ export default {
       tickets: 'Tickets',
       massEmail: 'Mass Email',
       signOut: 'Sign Out'
+    },
+    leaderboard: {
+      eyebrow: 'Usage ranking',
+      title: 'Token Leaderboard',
+      subtitle: 'Rank active workspace users by their actual token usage.',
+      refresh: 'Refresh leaderboard',
+      errorTitle: 'Unable to load leaderboard',
+      emptyTitle: 'No usage in this period',
+      emptyDescription: 'Choose another period or refresh again later.',
+      anonymous: 'User {id}',
+      podiumLabel: 'Top three users',
+      updatedAt: 'Updated at {time}',
+      period: { label: 'Reporting period', today: 'Today', '7d': '7 days', '30d': '30 days' },
+      metrics: { tokens: 'Tokens', requests: 'Requests', cost: 'Actual spend' },
+      table: { title: 'Full ranking', caption: '{count} users', rank: 'Rank', user: 'User' },
+      embed: {
+        action: 'Embed settings',
+        title: 'Leaderboard embed settings',
+        subtitle: 'The current workspace is bound automatically to create a secure Sub2API custom-menu URL.',
+        sourceOrigin: 'Bound site',
+        sourceOriginHint: 'This address comes from the current workspace Sub2API admin session and requires no manual input.',
+        url: 'Iframe URL',
+        urlHint: 'Use this URL in the Sub2API custom menu URL field.',
+        copy: 'Copy URL',
+        copyFailed: 'Copy failed. Select the URL manually.',
+        rotate: 'Regenerate token',
+        confirmRotate: 'Regenerating the token invalidates the previous embed URL. Continue?',
+        close: 'Close'
+      },
+      errors: {
+        network: 'Network request failed. Check the connection and try again.',
+        request: 'The request parameters are invalid. Refresh and try again.',
+        invalidSourceOrigin: 'The source origin must exactly match the Sub2API site connected to this workspace.',
+        upstreamUnsupported: 'This Sub2API version does not support the leaderboard endpoint or token sorting. Upgrade it first.',
+        unknown: 'The leaderboard request failed. Try again later.'
+      }
     },
     adminAccounts: {
       title: 'Select Workspace',
@@ -1794,6 +1831,37 @@ export default {
         imageTooLarge: 'Each image must be 5MB or smaller.',
         emptyImage: 'The image is empty, please choose another one.',
         attachmentLoadFailed: 'Failed to load image, please try again later.'
+      }
+    },
+    leaderboard: {
+      eyebrow: 'Usage ranking',
+      title: 'Token Leaderboard',
+      subtitle: 'Rank users by their actual token usage.',
+      refresh: 'Refresh leaderboard',
+      errorTitle: 'Unable to load leaderboard',
+      emptyTitle: 'No usage in this period',
+      emptyDescription: 'Choose another period or refresh again later.',
+      anonymous: 'User {id}',
+      podiumLabel: 'Top three users',
+      updatedAt: 'Updated at {time}',
+      period: { label: 'Reporting period', today: 'Today', '7d': '7 days', '30d': '30 days' },
+      metrics: { tokens: 'Tokens', requests: 'Requests', cost: 'Actual spend' },
+      table: { title: 'Full ranking', caption: '{count} users', rank: 'Rank', user: 'User' },
+      errors: {
+        network: 'Network request failed. Try again later.',
+        request: 'The leaderboard request failed. Try again later.',
+        missingParams: 'Required iframe session parameters are missing. Open this page from a Sub2API custom menu.',
+        configNotFound: 'The leaderboard embed is not configured or has no source site.',
+        invalidSrcHost: 'The source address is invalid.',
+        srcHostMismatch: 'The current source site does not match the embed configuration.',
+        sourceBinding: 'The leaderboard source has changed. Ask an administrator to save the embed settings again.',
+        sub2apiAuth: 'Identity verification failed. Refresh the page and try again.',
+        sub2apiRequest: 'Unable to connect to the source site. Try again later.',
+        userMismatch: 'User identity verification failed.',
+        sessionInvalid: 'The session expired. Refresh the page and try again.',
+        adminSession: 'The admin session is unavailable. Ask the site administrator to reconnect the workspace.',
+        upstreamUnsupported: 'This Sub2API version does not support the leaderboard. Ask an administrator to upgrade it.',
+        upstreamRequest: 'Leaderboard data is temporarily unavailable. Try again later.'
       }
     }
   }

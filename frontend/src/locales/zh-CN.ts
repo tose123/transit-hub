@@ -115,6 +115,7 @@ export default {
     },
     menu: {
       dashboard: '仪表盘',
+      leaderboard: '排行榜',
       upstream: '上游管理',
       groupManagement: '分组管理',
       groupRates: '分组倍率',
@@ -125,6 +126,42 @@ export default {
       tickets: '工单',
       massEmail: '群发邮件',
       signOut: '退出登录'
+    },
+    leaderboard: {
+      eyebrow: '用量排行',
+      title: 'Token 排行榜',
+      subtitle: '按实际 Token 使用量查看当前工作区的活跃用户。',
+      refresh: '刷新排行榜',
+      errorTitle: '排行榜加载失败',
+      emptyTitle: '当前周期暂无用量',
+      emptyDescription: '切换统计周期或稍后刷新后再查看。',
+      anonymous: '用户 {id}',
+      podiumLabel: '前三名用户',
+      updatedAt: '更新于 {time}',
+      period: { label: '统计周期', today: '今日', '7d': '7 天', '30d': '30 天' },
+      metrics: { tokens: 'Token', requests: '请求数', cost: '实际消费' },
+      table: { title: '完整排名', caption: '共 {count} 位用户', rank: '排名', user: '用户' },
+      embed: {
+        action: '嵌入设置',
+        title: '排行榜嵌入设置',
+        subtitle: '系统会自动绑定当前工作区，并生成安全的 Sub2API 自定义菜单链接。',
+        sourceOrigin: '当前绑定站点',
+        sourceOriginHint: '此地址自动读取自当前工作区的 Sub2API 管理会话，无需手动填写。',
+        url: 'iframe 链接',
+        urlHint: '将此链接填写到 Sub2API 自定义菜单的 URL 中。',
+        copy: '复制链接',
+        copyFailed: '复制失败，请手动选择链接。',
+        rotate: '重新生成令牌',
+        confirmRotate: '重新生成后，旧的排行榜嵌入链接将失效。确定继续吗？',
+        close: '关闭'
+      },
+      errors: {
+        network: '网络请求失败，请检查连接后重试。',
+        request: '请求参数无效，请刷新后重试。',
+        invalidSourceOrigin: '来源地址必须与当前工作区连接的 Sub2API 站点完全一致。',
+        upstreamUnsupported: '当前 Sub2API 版本不支持排行榜接口或 Token 排序，请先升级。',
+        unknown: '排行榜请求失败，请稍后重试。'
+      }
     },
     adminAccounts: {
       title: '选择工作区',
@@ -1794,6 +1831,37 @@ export default {
         imageTooLarge: '单张图片大小不能超过 5MB。',
         emptyImage: '图片内容为空，请重新选择。',
         attachmentLoadFailed: '图片加载失败，请稍后重试。'
+      }
+    },
+    leaderboard: {
+      eyebrow: '用量排行',
+      title: 'Token 排行榜',
+      subtitle: '按实际 Token 使用量查看用户排名。',
+      refresh: '刷新排行榜',
+      errorTitle: '排行榜加载失败',
+      emptyTitle: '当前周期暂无用量',
+      emptyDescription: '切换统计周期或稍后刷新后再查看。',
+      anonymous: '用户 {id}',
+      podiumLabel: '前三名用户',
+      updatedAt: '更新于 {time}',
+      period: { label: '统计周期', today: '今日', '7d': '7 天', '30d': '30 天' },
+      metrics: { tokens: 'Token', requests: '请求数', cost: '实际消费' },
+      table: { title: '完整排名', caption: '共 {count} 位用户', rank: '排名', user: '用户' },
+      errors: {
+        network: '网络请求失败，请稍后重试。',
+        request: '排行榜请求失败，请稍后重试。',
+        missingParams: '当前页面缺少 iframe 会话参数，请从 Sub2API 自定义菜单中打开。',
+        configNotFound: '排行榜嵌入配置不存在或尚未绑定来源站点。',
+        invalidSrcHost: '来源地址无效。',
+        srcHostMismatch: '当前来源站点与嵌入配置不匹配。',
+        sourceBinding: '排行榜嵌入来源已变更，请联系管理员重新保存嵌入设置。',
+        sub2apiAuth: '身份校验失败，请刷新页面重试。',
+        sub2apiRequest: '无法连接来源站点，请稍后重试。',
+        userMismatch: '用户身份校验失败。',
+        sessionInvalid: '会话已过期，请刷新页面重试。',
+        adminSession: '管理员会话不可用，请联系站点管理员重新连接工作区。',
+        upstreamUnsupported: '当前 Sub2API 版本不支持排行榜，请联系管理员升级。',
+        upstreamRequest: '排行榜数据暂时不可用，请稍后重试。'
       }
     }
   }
