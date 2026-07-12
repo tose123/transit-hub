@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"transithub/backend/internal/modules/group_rate_campaigns"
 	"transithub/backend/internal/modules/group_rates"
 	"transithub/backend/internal/modules/health"
+	"transithub/backend/internal/modules/mass_email"
 	"transithub/backend/internal/modules/my_sites"
 	"transithub/backend/internal/modules/settings"
 	"transithub/backend/internal/modules/system"
@@ -111,6 +113,12 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 	if err := settingsService.EnsureSchema(context.Background()); err != nil {
 		panic(err)
 	}
+	// SMTP_ENCRYPTION_KEY 是可选项：空值不影响启动；显式配置了非法值（非 base64 或非 32 字节）
+	// 必须尽早启动失败，避免运行时才发现加密能力不可用。抽成 configureSMTPEncryptionKey
+	// 这个窄 seam，便于在不启动真实 DB/Redis 依赖的情况下单元测试这条组装路径。
+	if _, err := configureSMTPEncryptionKey(settingsService, cfg.SMTPEncryptionKey); err != nil {
+		panic(err)
+	}
 
 	// dashboard 指标表必须在 admin_accounts 之前完成 schema，
 	// 因为 admin_accounts.EnsureSchema 的 legacy 迁移会 UPDATE dashboard 表。
@@ -125,12 +133,23 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 		panic(err)
 	}
 	admin_accounts.RegisterRoutes(server.mux, adminAccountsService)
-	if err := upstreamService.RestoreSavedSites(context.Background()); err != nil {
-		panic(err)
-	}
 
 	// 注入机器人通知能力，供自动调价成功后发送通知。
 	mySitesService.SetBotNotifier(settingsService)
+
+	// 批量邮件模块只复用已保存的模板/SMTP 配置和当前 workspace 的 Sub2API admin 会话；
+	// 创建批次时只解析收件人，真正 SMTP 发送由 Postgres-backed worker 异步执行。
+	massEmailService := mass_email.NewService(
+		mass_email.NewRepository(db),
+		mySitesService,
+		platformService,
+		settingsService,
+	)
+	if err := massEmailService.EnsureSchema(context.Background()); err != nil {
+		panic(err)
+	}
+	mass_email.RegisterRoutes(server.mux, massEmailService, adminAccountsService)
+	massEmailWorker := mass_email.NewWorker(massEmailService)
 
 	// 活动调价中心：批量修改 admin 自有分组倍率的独立模块，不复用/不污染 my_sites 的自动调价逻辑。
 	// mySitesService 提供 admin 会话与分组倍率读写能力，groupRatesService 提供分组类型标签查询，
@@ -153,7 +172,6 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 	}
 	campaignsService.SetAdminAccountResolver(adminAccountsService)
 	group_rate_campaigns.RegisterRoutes(server.mux, campaignsService, adminAccountsService)
-	campaignsService.StartScheduler(context.Background())
 
 	// 分组健康探活模块：数据源为 real_connections（通过 mySitesService 只读接口），
 	// upstreamService 提供站点 base_url/平台类型查询，platformService 提供 new-api 远端降级/恢复能力。
@@ -172,6 +190,17 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 	// 分组下账号/渠道，叠加 real_connections 探活状态。platformService 已实现所需方法。
 	connHealthService.SetPlatformGroupReader(platformService)
 	connection_health.RegisterRoutes(server.mux, connHealthService)
+
+	// 所有 workspace 表 schema 完成后再补 legacy 归属；随后才启动 restore、worker 和 scheduler，
+	// 避免后台任务在旧行尚未补齐 workspace 时读取或写回数据。
+	if err := adminAccountsService.AssignLegacyRows(context.Background()); err != nil {
+		panic(err)
+	}
+	if err := upstreamService.RestoreSavedSites(context.Background()); err != nil {
+		panic(err)
+	}
+	massEmailWorker.Start(context.Background())
+	campaignsService.StartScheduler(context.Background())
 	connHealthService.StartScheduler(context.Background())
 
 	// 策略设置变更时通知上游服务更新定时同步配置。
@@ -208,6 +237,13 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 	dashboardService := dashboard.NewService(dashboardSessionStore, platformService)
 	dashboardService.SetAdminAccountService(adminAccountsService)
 	dashboardService.SetMySiteSync(mySitesService)
+	adminAccountsService.SetWorkspaceCleanup(workspaceCleanup{
+		dashboardSessions: dashboardSessionStore,
+		ticketSessions:    ticketsSessions,
+		attachments:       ticketsStorage,
+		upstreamSites:     upstreamService,
+	})
+	adminAccountsService.StartCleanupWorker(context.Background(), time.Minute)
 	dashboardService.StartRefresher(context.Background())
 
 	// 仪表盘指标服务：实时计算五项核心指标 + 历史趋势快照。
@@ -226,6 +262,59 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 
 type groupRateSnapshotWriter struct {
 	service *group_rates.Service
+}
+
+type dashboardSessionCleaner interface {
+	Delete(ctx context.Context, userID string, adminAccountID string) error
+}
+
+type ticketEmbedSessionCleaner interface {
+	DeleteWorkspace(ctx context.Context, userID string, adminAccountID string) error
+}
+
+type attachmentCleaner interface {
+	Delete(storagePath string) error
+}
+
+type upstreamSiteCleaner interface {
+	CleanupDeletedWorkspaceSites(ctx context.Context, userID string, siteIDs []string) error
+}
+
+type workspaceCleanup struct {
+	dashboardSessions dashboardSessionCleaner
+	ticketSessions    ticketEmbedSessionCleaner
+	attachments       attachmentCleaner
+	upstreamSites     upstreamSiteCleaner
+}
+
+func (c workspaceCleanup) CleanupDeletedWorkspace(ctx context.Context, payload admin_accounts.WorkspaceCleanupPayload) error {
+	var errs []error
+	if c.dashboardSessions != nil {
+		if err := c.dashboardSessions.Delete(ctx, payload.UserID, payload.AdminAccountID); err != nil {
+			errs = append(errs, fmt.Errorf("dashboard session cleanup: %w", err))
+		}
+	}
+	if c.ticketSessions != nil {
+		if err := c.ticketSessions.DeleteWorkspace(ctx, payload.UserID, payload.AdminAccountID); err != nil {
+			errs = append(errs, fmt.Errorf("ticket embed session cleanup: %w", err))
+		}
+	}
+	if c.upstreamSites != nil {
+		if err := c.upstreamSites.CleanupDeletedWorkspaceSites(ctx, payload.UserID, payload.UpstreamSiteIDs); err != nil {
+			errs = append(errs, fmt.Errorf("upstream site cleanup: %w", err))
+		}
+	}
+	if c.attachments != nil {
+		for _, path := range payload.AttachmentStoragePaths {
+			if strings.TrimSpace(path) == "" {
+				continue
+			}
+			if err := c.attachments.Delete(path); err != nil {
+				errs = append(errs, fmt.Errorf("ticket attachment cleanup %q: %w", path, err))
+			}
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (w groupRateSnapshotWriter) SaveSiteSnapshot(ctx context.Context, userID string, adminAccountID string, siteID string, siteName string, sitePlatform upstream.Platform, groups []upstream.SnapshotGroup) error {
@@ -263,7 +352,7 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) protectedPath(path string) bool {
-	return strings.HasPrefix(path, "/api/admin-accounts") || strings.HasPrefix(path, "/api/upstream-sites") || strings.HasPrefix(path, "/api/group-rates") || strings.HasPrefix(path, "/api/group-rate-campaigns") || strings.HasPrefix(path, "/api/my-sites") || strings.HasPrefix(path, "/api/settings") || strings.HasPrefix(path, "/api/dashboard") || strings.HasPrefix(path, "/api/system") || strings.HasPrefix(path, "/api/connection-health") || strings.HasPrefix(path, "/api/tickets")
+	return strings.HasPrefix(path, "/api/admin-accounts") || strings.HasPrefix(path, "/api/upstream-sites") || strings.HasPrefix(path, "/api/group-rates") || strings.HasPrefix(path, "/api/group-rate-campaigns") || strings.HasPrefix(path, "/api/my-sites") || strings.HasPrefix(path, "/api/settings") || strings.HasPrefix(path, "/api/dashboard") || strings.HasPrefix(path, "/api/system") || strings.HasPrefix(path, "/api/connection-health") || strings.HasPrefix(path, "/api/tickets") || strings.HasPrefix(path, "/api/mass-email")
 }
 
 func bearerToken(header string) string {

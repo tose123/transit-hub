@@ -1,16 +1,26 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Plus, Save, Loader2, CheckCircle2, MessageSquare, Send, Trash2, Timer, AlertTriangle, TrendingUp, Info } from 'lucide-vue-next'
+import { Plus, Save, Loader2, CheckCircle2, MessageSquare, Send, Trash2, Timer, AlertTriangle, TrendingUp, Info, Mail } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { getNotificationChannelSettings, getStrategySettings, saveNotificationChannelSettings, saveStrategySettings, testNotificationChannel } from '../api/settings'
-import type { NotificationChannel, NotificationChannelSettings, StrategySettings, TestNotificationChannelPayload } from '../types/settings'
+import EmailTemplatesPanel from '../components/settings/EmailTemplatesPanel.vue'
+import {
+  getNotificationChannelSettings,
+  getSmtpSettings,
+  getStrategySettings,
+  saveNotificationChannelSettings,
+  saveSmtpSettings,
+  saveStrategySettings,
+  testNotificationChannel,
+  testSmtpEmail,
+} from '../api/settings'
+import type { NotificationChannel, NotificationChannelSettings, SmtpSettings, SmtpTlsMode, StrategySettings, TestNotificationChannelPayload } from '../types/settings'
 
 const { t } = useI18n()
 
 // Tab Settings
-const activeTab = ref<'strategy' | 'channels'>('strategy')
+const activeTab = ref<'strategy' | 'channels' | 'email'>('strategy')
 
 // Save loading states
 const isSavingStrategy = ref(false)
@@ -254,9 +264,165 @@ const toggleMultiplierBot = (botId: string) => {
   else multiplierSelectedBots.value.push(botId)
 }
 
+// === Tab 3: Email (SMTP) ===
+const isSavingSmtp = ref(false)
+const showSuccessSmtp = ref(false)
+const isLoadingSmtp = ref(false)
+const errorSmtp = ref('')
+
+const isTestingSmtp = ref(false)
+const errorSmtpTest = ref('')
+const successSmtpTest = ref(false)
+
+const smtpHost = ref('')
+const smtpPort = ref('587')
+const smtpUsername = ref('')
+const smtpPassword = ref('')
+const smtpFromEmail = ref('')
+const smtpFromName = ref('')
+const smtpTlsMode = ref<SmtpTlsMode>('starttls')
+const smtpTestRecipient = ref('')
+const smtpPasswordConfigured = ref(false)
+
+type SmtpBaseline = {
+  host: string
+  port: number
+  username: string
+  fromEmail: string
+  fromName: string
+  tlsMode: SmtpTlsMode
+}
+
+const smtpBaseline = ref<SmtpBaseline | null>(null)
+
+// smtpPortNumber 严格解析端口原始字符串：必须是纯十进制数字（不含符号、小数点、空白），
+// 且落在 1-65535 范围内，否则视为非法（null）。刻意不用 `Number.parseInt(...) || 587` 之类的
+// 兜底——那会把空字符串、非法字符串和 0 都静默救回 587，掩盖真实的表单校验缺口。
+// 允许形如 "0587" 的前导零输入：按十进制解析为 587，行为确定且在此注明。
+const smtpPortNumber = computed<number | null>(() => {
+  const raw = smtpPort.value.trim()
+  if (!/^\d+$/.test(raw)) return null
+  const parsed = Number.parseInt(raw, 10)
+  if (parsed < 1 || parsed > 65535) return null
+  return parsed
+})
+
+const smtpPortInvalid = computed(() => smtpPortNumber.value === null)
+
+const currentSmtpBaseline = (): SmtpBaseline => ({
+  host: smtpHost.value.trim(),
+  // 非法端口没有合法数值可用于比较；用 -1 这个越界哨兵值确保它永远不等于 baseline 的合法端口，
+  // 从而让 smtpDirty 恒为 true（非法输入必须阻止“视为未变更”）。
+  port: smtpPortNumber.value ?? -1,
+  username: smtpUsername.value.trim(),
+  fromEmail: smtpFromEmail.value.trim(),
+  fromName: smtpFromName.value.trim(),
+  tlsMode: smtpTlsMode.value,
+})
+
+const smtpDirty = computed(() => {
+  if (smtpPassword.value.trim() !== '') return true
+  if (smtpPortInvalid.value) return true
+  if (!smtpBaseline.value) return true
+  const current = currentSmtpBaseline()
+  return (
+    current.host !== smtpBaseline.value.host ||
+    current.port !== smtpBaseline.value.port ||
+    current.username !== smtpBaseline.value.username ||
+    current.fromEmail !== smtpBaseline.value.fromEmail ||
+    current.fromName !== smtpBaseline.value.fromName ||
+    current.tlsMode !== smtpBaseline.value.tlsMode
+  )
+})
+
+const applySmtpSettings = (settings: SmtpSettings) => {
+  smtpHost.value = settings.host
+  // 后端 no-record 默认值和已保存记录都保证 port 是合法整数；这里只展示后端返回的值，
+  // 不再用 `|| 587` 掩盖 API 合同缺口。
+  smtpPort.value = String(settings.port)
+  smtpUsername.value = settings.username
+  smtpFromEmail.value = settings.fromEmail
+  smtpFromName.value = settings.fromName
+  smtpTlsMode.value = settings.tlsMode
+  smtpPasswordConfigured.value = settings.passwordConfigured
+  smtpPassword.value = ''
+  smtpBaseline.value = {
+    host: settings.host,
+    port: settings.port,
+    username: settings.username,
+    fromEmail: settings.fromEmail,
+    fromName: settings.fromName,
+    tlsMode: settings.tlsMode,
+  }
+}
+
+const loadSmtp = async () => {
+  if (isLoadingSmtp.value) return
+  isLoadingSmtp.value = true
+  errorSmtp.value = ''
+  try {
+    applySmtpSettings(await getSmtpSettings())
+  } catch (error) {
+    errorSmtp.value = error instanceof Error ? error.message : 'admin.settings.errors.unknown'
+  } finally {
+    isLoadingSmtp.value = false
+  }
+}
+
+const saveSmtp = async () => {
+  if (isSavingSmtp.value) return
+  if (smtpPortInvalid.value) {
+    // 防御性兜底：正常情况下保存按钮已经因为 smtpPortInvalid 被禁用，这里避免任何
+    // 程序化调用绕过 UI 禁用状态直接把非法端口发给后端。
+    errorSmtp.value = 'admin.settings.smtp.errors.invalidPort'
+    return
+  }
+  isSavingSmtp.value = true
+  errorSmtp.value = ''
+  showSuccessSmtp.value = false
+  try {
+    // 密码字节保真：非空白密码必须原样发送 smtpPassword.value，不能 trim/归一化，
+    // 否则合法密码里的前导/尾随空格会被后端加密前的处理悄悄破坏。
+    const rawPassword = smtpPassword.value
+    const payload = {
+      host: smtpHost.value.trim(),
+      port: smtpPortNumber.value as number,
+      username: smtpUsername.value.trim(),
+      ...(rawPassword.trim() !== '' ? { password: rawPassword } : {}),
+      fromEmail: smtpFromEmail.value.trim(),
+      fromName: smtpFromName.value.trim(),
+      tlsMode: smtpTlsMode.value,
+    }
+    applySmtpSettings(await saveSmtpSettings(payload))
+    showSuccessSmtp.value = true
+    setTimeout(() => { showSuccessSmtp.value = false }, 3000)
+  } catch (error) {
+    errorSmtp.value = error instanceof Error ? error.message : 'admin.settings.errors.unknown'
+  } finally {
+    isSavingSmtp.value = false
+  }
+}
+
+const testSmtp = async () => {
+  if (isTestingSmtp.value || smtpDirty.value) return
+  isTestingSmtp.value = true
+  errorSmtpTest.value = ''
+  successSmtpTest.value = false
+  try {
+    await testSmtpEmail({ recipientEmail: smtpTestRecipient.value.trim() })
+    successSmtpTest.value = true
+    setTimeout(() => { successSmtpTest.value = false }, 3000)
+  } catch (error) {
+    errorSmtpTest.value = error instanceof Error ? error.message : 'admin.settings.errors.unknown'
+  } finally {
+    isTestingSmtp.value = false
+  }
+}
+
 onMounted(async () => {
   await loadChannels()
   void loadStrategy()
+  void loadSmtp()
 })
 </script>
 
@@ -285,6 +451,17 @@ onMounted(async () => {
           <div class="flex items-center gap-2">
             <MessageSquare class="w-4 h-4" />
             {{ t('admin.settings.tabs.channels') }}
+          </div>
+        </button>
+        <button
+          @click="activeTab = 'email'"
+          class="relative px-6 py-2.5 text-sm font-medium transition-all duration-300 rounded-xl whitespace-nowrap"
+          :class="activeTab === 'email' ? 'text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-surface/50'"
+        >
+          <div v-if="activeTab === 'email'" class="absolute inset-0 bg-background border border-border/50 rounded-xl -z-10 shadow-sm"></div>
+          <div class="flex items-center gap-2">
+            <Mail class="w-4 h-4" />
+            {{ t('admin.settings.tabs.email') }}
           </div>
         </button>
       </div>
@@ -670,6 +847,120 @@ onMounted(async () => {
 
           </div>
         </section>
+
+        <!-- ============================================ -->
+        <!-- Email (SMTP) Tab                              -->
+        <!-- ============================================ -->
+        <div v-else-if="activeTab === 'email'" class="space-y-6">
+        <section class="rounded-2xl border border-border/50 bg-card shadow-sm overflow-hidden w-full">
+          <div class="p-6 border-b border-border/50 bg-surface/30 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="p-2 bg-blue-500/10 text-blue-500 rounded-xl">
+                <Mail class="w-5 h-5" />
+              </div>
+              <div>
+                <h3 class="text-lg font-semibold text-foreground">{{ t('admin.settings.smtp.title') }}</h3>
+                <p class="text-sm text-muted-foreground">{{ t('admin.settings.smtp.description') }}</p>
+              </div>
+            </div>
+            <Button :disabled="isSavingSmtp || isLoadingSmtp || smtpPortInvalid" @click="saveSmtp" class="min-w-[120px]">
+              <Loader2 v-if="isSavingSmtp" class="h-4 w-4 animate-spin mr-2" />
+              <CheckCircle2 v-else-if="showSuccessSmtp" class="h-4 w-4 mr-2 text-green-400" />
+              <Save v-else class="h-4 w-4 mr-2" />
+              {{ showSuccessSmtp ? t('admin.settings.smtp.saveSuccess') : (isSavingSmtp ? t('admin.settings.saving') : t('admin.settings.save')) }}
+            </Button>
+          </div>
+          <div class="p-6 space-y-5">
+            <p v-if="isLoadingSmtp" class="text-sm text-muted-foreground">{{ t('admin.settings.sections.channels.loading') }}</p>
+            <p v-if="errorSmtp" class="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">{{ t(errorSmtp) }}</p>
+
+            <div class="grid md:grid-cols-2 gap-4">
+              <div class="grid gap-2">
+                <label for="smtp-host" class="text-xs font-medium text-muted-foreground">{{ t('admin.settings.smtp.host') }}</label>
+                <Input id="smtp-host" v-model="smtpHost" placeholder="smtp.example.com" class="h-9 text-sm" />
+              </div>
+              <div class="grid gap-2">
+                <label for="smtp-port" class="text-xs font-medium text-muted-foreground">{{ t('admin.settings.smtp.port') }}</label>
+                <Input
+                  id="smtp-port"
+                  type="number"
+                  v-model="smtpPort"
+                  placeholder="587"
+                  class="h-9 text-sm"
+                  :class="{ 'border-destructive focus:border-destructive': smtpPortInvalid }"
+                />
+                <p v-if="smtpPortInvalid" class="text-xs text-destructive">{{ t('admin.settings.smtp.errors.invalidPort') }}</p>
+              </div>
+              <div class="grid gap-2">
+                <label for="smtp-tls-mode" class="text-xs font-medium text-muted-foreground">{{ t('admin.settings.smtp.tlsMode') }}</label>
+                <select
+                  id="smtp-tls-mode"
+                  v-model="smtpTlsMode"
+                  class="flex h-9 w-full rounded-lg border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  <option value="starttls">{{ t('admin.settings.smtp.tlsStarttls') }}</option>
+                  <option value="implicit">{{ t('admin.settings.smtp.tlsImplicit') }}</option>
+                </select>
+              </div>
+              <div class="grid gap-2">
+                <label for="smtp-username" class="text-xs font-medium text-muted-foreground">{{ t('admin.settings.smtp.username') }}</label>
+                <Input id="smtp-username" v-model="smtpUsername" class="h-9 text-sm" />
+              </div>
+              <div class="grid gap-2">
+                <label for="smtp-password" class="text-xs font-medium text-muted-foreground flex items-center gap-2">
+                  {{ t('admin.settings.smtp.password') }}
+                  <span
+                    class="text-[11px] font-normal px-1.5 py-0.5 rounded"
+                    :class="smtpPasswordConfigured ? 'bg-green-500/10 text-green-500' : 'bg-surface-elevated text-muted-foreground'"
+                  >
+                    {{ smtpPasswordConfigured ? t('admin.settings.smtp.passwordConfigured') : t('admin.settings.smtp.passwordNotConfigured') }}
+                  </span>
+                </label>
+                <Input
+                  id="smtp-password"
+                  type="password"
+                  v-model="smtpPassword"
+                  :placeholder="smtpPasswordConfigured ? t('admin.settings.smtp.passwordKeepPlaceholder') : t('admin.settings.smtp.passwordNewPlaceholder')"
+                  class="h-9 text-sm"
+                />
+              </div>
+              <div class="grid gap-2">
+                <label for="smtp-from-email" class="text-xs font-medium text-muted-foreground">{{ t('admin.settings.smtp.fromEmail') }}</label>
+                <Input id="smtp-from-email" type="email" v-model="smtpFromEmail" class="h-9 text-sm" />
+              </div>
+              <div class="grid gap-2">
+                <label for="smtp-from-name" class="text-xs font-medium text-muted-foreground">{{ t('admin.settings.smtp.fromName') }}</label>
+                <Input id="smtp-from-name" v-model="smtpFromName" class="h-9 text-sm" />
+              </div>
+            </div>
+
+            <div class="border-t border-border/40 pt-5 space-y-3">
+              <div class="grid gap-2 max-w-sm">
+                <label for="smtp-test-recipient" class="text-xs font-medium text-muted-foreground">{{ t('admin.settings.smtp.testRecipient') }}</label>
+                <Input id="smtp-test-recipient" type="email" v-model="smtpTestRecipient" class="h-9 text-sm" />
+              </div>
+              <div class="flex items-center gap-3">
+                <Button
+                  variant="secondary"
+                  :disabled="isTestingSmtp || smtpDirty || !smtpTestRecipient.trim()"
+                  @click="testSmtp"
+                >
+                  <Loader2 v-if="isTestingSmtp" class="h-4 w-4 animate-spin mr-2" />
+                  <CheckCircle2 v-else-if="successSmtpTest" class="h-4 w-4 mr-2 text-green-400" />
+                  <Send v-else class="h-4 w-4 mr-2" />
+                  {{ successSmtpTest ? t('admin.settings.smtp.testEmailSuccess') : t('admin.settings.smtp.testEmail') }}
+                </Button>
+                <p v-if="smtpDirty" class="text-xs text-amber-500 flex items-center gap-1.5">
+                  <Info class="w-3.5 h-3.5" />
+                  {{ t('admin.settings.smtp.dirtyBeforeTest') }}
+                </p>
+              </div>
+              <p v-if="errorSmtpTest" class="text-xs text-destructive">{{ t(errorSmtpTest) }}</p>
+            </div>
+          </div>
+        </section>
+        <EmailTemplatesPanel />
+        </div>
       </transition>
     </div>
   </div>

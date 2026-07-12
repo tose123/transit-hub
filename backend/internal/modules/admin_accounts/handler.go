@@ -16,6 +16,7 @@ func RegisterRoutes(mux *http.ServeMux, service *Service) {
 	mux.HandleFunc("GET /api/admin-accounts", handler.list)
 	mux.HandleFunc("GET /api/admin-accounts/current", handler.current)
 	mux.HandleFunc("POST /api/admin-accounts/current", handler.switchCurrent)
+	mux.HandleFunc("DELETE /api/admin-accounts/{id}", handler.delete)
 	mux.HandleFunc("PUT /api/admin-accounts/", handler.update)
 }
 
@@ -90,6 +91,26 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpjson.Write(w, http.StatusOK, account)
+}
+
+func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
+	userID, ok := authctx.UserID(r.Context())
+	if !ok {
+		httpjson.WriteError(w, http.StatusUnauthorized, "auth.errors.unauthorized")
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	var dto DeleteRequest
+	if err := httpjson.Decode(r, &dto); err != nil {
+		httpjson.WriteError(w, http.StatusBadRequest, ErrorRequest)
+		return
+	}
+	response, err := h.service.DeleteWorkspace(r.Context(), userID, id, dto)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, response)
 }
 
 func writeError(w http.ResponseWriter, err error) {

@@ -88,7 +88,8 @@ func (r *MetricsRepository) EnsureSchema(ctx context.Context) error {
 func (r *MetricsRepository) Upsert(ctx context.Context, snapshot DailySnapshot) error {
 	_, err := r.db.Exec(ctx, `
 		INSERT INTO dashboard_daily_stats (id, user_id, admin_account_id, date, today_profit, site_balance, today_purchase, net_profit, upstream_balance, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+		WHERE EXISTS (SELECT 1 FROM admin_accounts WHERE user_id = $2 AND id = $3)
 		ON CONFLICT (user_id, admin_account_id, date) DO UPDATE SET
 			today_profit     = EXCLUDED.today_profit,
 			site_balance     = EXCLUDED.site_balance,
@@ -96,6 +97,7 @@ func (r *MetricsRepository) Upsert(ctx context.Context, snapshot DailySnapshot) 
 			net_profit       = EXCLUDED.net_profit,
 			upstream_balance = EXCLUDED.upstream_balance,
 			created_at       = EXCLUDED.created_at
+		WHERE EXISTS (SELECT 1 FROM admin_accounts WHERE user_id = EXCLUDED.user_id AND id = EXCLUDED.admin_account_id)
 	`, snapshot.ID, snapshot.UserID, snapshot.AdminAccountID, snapshot.Date, snapshot.TodayProfit, snapshot.SiteBalance,
 		snapshot.TodayPurchase, snapshot.NetProfit, snapshot.UpstreamBalance, snapshot.CreatedAt)
 	return err

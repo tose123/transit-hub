@@ -21,12 +21,20 @@ type StateRepository interface {
 	Save(ctx context.Context, state State) error
 }
 
+type TransactionalStateRepository interface {
+	MutateState(ctx context.Context, userID string, adminAccountID string, mutate StateMutation) (*State, error)
+}
+
 // RealConnectionRepository 真实对接绑定记录的持久化接口。
 type RealConnectionRepository interface {
 	SaveRealConnection(ctx context.Context, conn RealConnection) error
 	ListRealConnections(ctx context.Context, userID string, adminAccountID string) ([]RealConnection, error)
 	GetRealConnection(ctx context.Context, id string, userID string, adminAccountID string) (*RealConnection, error)
 	DeleteRealConnection(ctx context.Context, id string, userID string, adminAccountID string) error
+}
+
+type AtomicRealDisconnectRepository interface {
+	RemoveUpstreamMappingAndDeleteConnection(ctx context.Context, userID string, adminAccountID string, connectionID string, siteID string, groupName string) error
 }
 
 // UpstreamSiteLookup 根据 ID 获取上游站点信息（含 Session），供真实对接流程使用。
@@ -105,24 +113,37 @@ func (s *Service) MappingOptions(ctx context.Context, userID string) (MappingOpt
 		}
 		freshOwnGroups = append(freshOwnGroups, GroupOption{Name: name, Multiplier: multiplier})
 	}
-	if err := s.backfillMappingsFromRealConnections(ctx, state, idToName); err != nil {
-		return MappingOptionsResponse{}, err
-	}
 	// 自有分组变化时，自动清理引用了已不存在分组的映射关系
 	freshGroupSet := make(map[string]struct{}, len(freshOwnGroups))
 	for _, g := range freshOwnGroups {
 		freshGroupSet[strings.TrimSpace(g.Name)] = struct{}{}
 	}
-	cleanedMappings := make([]GroupMapping, 0, len(state.Mappings))
-	for _, m := range state.Mappings {
-		if _, exists := freshGroupSet[strings.TrimSpace(m.OwnGroup)]; exists {
-			cleanedMappings = append(cleanedMappings, m)
+	prunableTargets := s.authoritativeMissingTargets(ctx, userID, adminAccountID, state.Mappings)
+	state, err = s.mutateState(ctx, userID, adminAccountID, func(latest *State) error {
+		var backfillConnections []RealConnection
+		if s.connRepository != nil {
+			backfillConnections, err = s.connRepository.ListRealConnections(ctx, userID, adminAccountID)
+			if err != nil {
+				return err
+			}
 		}
-	}
-	state.OwnGroups = freshOwnGroups
-	state.Mappings = cleanedMappings
-	if err := s.repository.Save(ctx, *state); err != nil {
+		applyMappingsFromRealConnections(latest, idToName, backfillConnections)
+		cleanedMappings := make([]GroupMapping, 0, len(latest.Mappings))
+		for _, m := range latest.Mappings {
+			if _, exists := freshGroupSet[strings.TrimSpace(m.OwnGroup)]; exists {
+				m.UpstreamTargets = pruneTargetsByKey(m.UpstreamTargets, prunableTargets)
+				cleanedMappings = append(cleanedMappings, m)
+			}
+		}
+		latest.OwnGroups = freshOwnGroups
+		latest.Mappings = cleanedMappings
+		return nil
+	})
+	if err != nil {
 		return MappingOptionsResponse{}, err
+	}
+	if state == nil {
+		return MappingOptionsResponse{}, requestError(ErrorAuthRequired)
 	}
 
 	groups := make([]MappingOwnGroupOption, 0, len(adminGroups))
@@ -259,11 +280,63 @@ func (s *Service) SaveMappings(ctx context.Context, userID string, mappings []Ma
 		}
 		next = append(next, gm)
 	}
-	state.Mappings = next
-	if err := s.repository.Save(ctx, *state); err != nil {
+	state, err = s.mutateState(ctx, userID, adminAccountID, func(latest *State) error {
+		merged := make([]GroupMapping, len(next))
+		for i := range next {
+			merged[i] = cloneGroupMappingValue(next[i])
+		}
+		mergeLastAutoPricingRunByOwnGroup(merged, latest.Mappings)
+		latest.Mappings = merged
+		return nil
+	})
+	if err != nil {
 		return StatusResponse{}, err
 	}
+	if state == nil {
+		return StatusResponse{}, requestError(ErrorAuthRequired)
+	}
 	return StatusResponse{Authenticated: true, BaseURL: state.BaseURL, Email: state.Email, Mappings: state.Mappings}, nil
+}
+
+// RunAutoPricingNow 手动触发单个自有分组的自动调价。
+// 手动运行使用当前上游缓存倍率作为参考值，不依赖同步前后快照，也不执行阈值拦截。
+func (s *Service) RunAutoPricingNow(ctx context.Context, userID string, req AutoPricingRunRequest) (AutoPricingRunResponse, error) {
+	ownGroup := strings.TrimSpace(req.OwnGroup)
+	if ownGroup == "" {
+		return AutoPricingRunResponse{}, requestError(ErrorRequest)
+	}
+	adminAccountID, err := s.currentAdminAccountID(ctx, userID)
+	if err != nil {
+		return AutoPricingRunResponse{}, err
+	}
+	state, err := s.authenticatedState(ctx, userID, adminAccountID)
+	if err != nil {
+		return AutoPricingRunResponse{}, err
+	}
+
+	mapping, ok := findMappingByOwnGroup(state.Mappings, ownGroup)
+	if !ok || !mapping.EnableAutoPricing {
+		return AutoPricingRunResponse{}, requestError(ErrorRequest)
+	}
+	adminGroups, err := s.platformService.FetchAdminAllGroups(state.Session)
+	if err != nil {
+		return AutoPricingRunResponse{}, err
+	}
+	adminGroupMap := make(map[string]upstream.AdminGroupInfo, len(adminGroups))
+	for _, group := range adminGroups {
+		adminGroupMap[group.Name] = group
+	}
+	result, updatedMapping, err := s.processManualAutoPricing(ctx, userID, adminAccountID, state, mapping, adminGroupMap, s.buildWorkspaceLookupMultiplier(ctx, userID, adminAccountID))
+	if err != nil {
+		return AutoPricingRunResponse{}, err
+	}
+	response := AutoPricingRunResponse{Mapping: updatedMapping}
+	if updatedMapping.LastAutoPricingRun != nil {
+		response.Result = *updatedMapping.LastAutoPricingRun
+	} else {
+		response.Result = autoPricingStatusFromResult(result, "manual", time.Now())
+	}
+	return response, nil
 }
 
 // RealConnect 执行真实对接流程：按平台分支创建上游 Key/Token 和 admin 端转发目标（账号/Channel），最后持久化绑定记录。
@@ -327,7 +400,7 @@ func (s *Service) RealConnect(ctx context.Context, userID string, req RealConnec
 }
 
 // realConnectSub2API 原有的 Sub2API 对接流程：创建 API Key + 创建转发账号。
-func (s *Service) realConnectSub2API(ctx context.Context, userID string, req RealConnectRequest, state *State, upstreamSite *upstream.Site, groupType, groupName, multiplierDisplay string) (RealConnection, error) {
+func (s *Service) realConnectSub2API(_ context.Context, userID string, req RealConnectRequest, state *State, upstreamSite *upstream.Site, groupType, groupName, multiplierDisplay string) (RealConnection, error) {
 	groupIDInt, err := strconv.Atoi(req.UpstreamGroupID)
 	if err != nil {
 		return RealConnection{}, requestError(ErrorRequest)
@@ -386,7 +459,7 @@ func (s *Service) realConnectSub2API(ctx context.Context, userID string, req Rea
 }
 
 // realConnectNewAPI new-api 对接流程：创建 Token → 回查 Token ID → 获取完整 Key → 创建 Channel → 回查 Channel ID。
-func (s *Service) realConnectNewAPI(ctx context.Context, userID string, req RealConnectRequest, state *State, upstreamSite *upstream.Site, groupType, groupName string) (RealConnection, error) {
+func (s *Service) realConnectNewAPI(_ context.Context, userID string, req RealConnectRequest, state *State, upstreamSite *upstream.Site, groupType, groupName string) (RealConnection, error) {
 	log.Printf("[real-connect] new-api 开始对接 site=%s group=%s type=%s", upstreamSite.Name, groupName, groupType)
 	upstreamSession := *upstreamSite.Session
 
@@ -681,39 +754,37 @@ func (s *Service) RealDisconnect(ctx context.Context, userID string, req RealDis
 		}
 	}
 
-	if err := s.connRepository.DeleteRealConnection(ctx, req.ConnectionID, userID, adminAccountID); err != nil {
+	if err := s.removeUpstreamMappingAndDeleteConnection(ctx, userID, adminAccountID, req.ConnectionID, conn.UpstreamSiteID, conn.UpstreamGroupName); err != nil {
 		return err
 	}
-
-	s.removeUpstreamMapping(ctx, userID, adminAccountID, conn.UpstreamSiteID, conn.UpstreamGroupName)
 
 	log.Printf("[real-disconnect] 取消对接完成 conn_id=%s mode=%s", req.ConnectionID, req.Mode)
 	return nil
 }
 
-// removeUpstreamMapping 从用户的 my_site_states.mappings 中移除引用了指定上游站点+分组的映射目标。
-// 清理后如果某个自有分组的 upstreamTargets 为空，则整条映射也会被移除。
-func (s *Service) removeUpstreamMapping(ctx context.Context, userID, adminAccountID, siteID, groupName string) {
+// removeUpstreamMappingAndDeleteConnection atomically removes the local mapping target and real_connection row.
+func (s *Service) removeUpstreamMappingAndDeleteConnection(ctx context.Context, userID, adminAccountID, connectionID, siteID, groupName string) error {
+	if repo, ok := s.connRepository.(AtomicRealDisconnectRepository); ok {
+		return repo.RemoveUpstreamMappingAndDeleteConnection(ctx, userID, adminAccountID, connectionID, siteID, groupName)
+	}
 	state, err := s.repository.Get(ctx, userID, adminAccountID)
-	if err != nil || state == nil || len(state.Mappings) == 0 {
-		return
+	if err != nil {
+		return err
 	}
-	cleaned := make([]GroupMapping, 0, len(state.Mappings))
-	for _, m := range state.Mappings {
-		targets := make([]UpstreamGroupRef, 0, len(m.UpstreamTargets))
-		for _, t := range m.UpstreamTargets {
-			if t.SiteID == siteID && t.GroupName == groupName {
-				continue
-			}
-			targets = append(targets, t)
-		}
-		if len(targets) > 0 {
-			m.UpstreamTargets = targets
-			cleaned = append(cleaned, m)
+	before := cloneStateForMutation(state)
+	if state != nil {
+		removeMappingTargetFromState(state, siteID, groupName)
+		if err := s.repository.Save(ctx, *state); err != nil {
+			return err
 		}
 	}
-	state.Mappings = cleaned
-	_ = s.repository.Save(ctx, *state)
+	if err := s.connRepository.DeleteRealConnection(ctx, connectionID, userID, adminAccountID); err != nil {
+		if before != nil {
+			_ = s.repository.Save(ctx, *before)
+		}
+		return err
+	}
+	return nil
 }
 
 // backfillMappingsFromRealConnections uses real_connections as the source of truth for
@@ -731,7 +802,14 @@ func (s *Service) backfillMappingsFromRealConnections(ctx context.Context, state
 	if len(connections) == 0 {
 		return nil
 	}
+	applyMappingsFromRealConnections(state, idToName, connections)
+	return nil
+}
 
+func applyMappingsFromRealConnections(state *State, idToName map[string]string, connections []RealConnection) {
+	if state == nil || len(connections) == 0 {
+		return
+	}
 	existing := make(map[string]int, len(state.Mappings))
 	for i := range state.Mappings {
 		existing[state.Mappings[i].OwnGroup] = i
@@ -759,7 +837,6 @@ func (s *Service) backfillMappingsFromRealConnections(ctx context.Context, state
 			}
 		}
 	}
-	return nil
 }
 
 func hasUpstreamTarget(targets []UpstreamGroupRef, target UpstreamGroupRef) bool {
@@ -978,6 +1055,23 @@ func (s *Service) RequireSession(ctx context.Context, userID string, adminAccoun
 	return state.Session, nil
 }
 
+func (s *Service) mutateState(ctx context.Context, userID string, adminAccountID string, mutate StateMutation) (*State, error) {
+	if repo, ok := s.repository.(TransactionalStateRepository); ok {
+		return repo.MutateState(ctx, userID, adminAccountID, mutate)
+	}
+	state, err := s.repository.Get(ctx, userID, adminAccountID)
+	if err != nil || state == nil {
+		return state, err
+	}
+	if err := mutate(state); err != nil {
+		return nil, err
+	}
+	if err := s.repository.Save(ctx, *state); err != nil {
+		return nil, err
+	}
+	return state, nil
+}
+
 // FetchAdminGroups 透传 platformService 拉取 admin 自有分组列表。
 func (s *Service) FetchAdminGroups(session upstream.Session) ([]upstream.AdminGroupInfo, error) {
 	return s.platformService.FetchAdminAllGroups(session)
@@ -1051,6 +1145,95 @@ func floatOrDefault(p *float64, defaultVal float64) float64 {
 	return *p
 }
 
+func cloneGroupMappingValue(mapping GroupMapping) GroupMapping {
+	copy := mapping
+	if mapping.UpstreamTargets != nil {
+		copy.UpstreamTargets = append([]UpstreamGroupRef(nil), mapping.UpstreamTargets...)
+	}
+	if mapping.AutoPricingNotifyBotIDs != nil {
+		copy.AutoPricingNotifyBotIDs = append([]string(nil), mapping.AutoPricingNotifyBotIDs...)
+	}
+	return copy
+}
+
+func cloneStateForMutation(state *State) *State {
+	if state == nil {
+		return nil
+	}
+	copy := *state
+	if state.Mappings != nil {
+		copy.Mappings = make([]GroupMapping, len(state.Mappings))
+		for i := range state.Mappings {
+			copy.Mappings[i] = cloneGroupMappingValue(state.Mappings[i])
+		}
+	}
+	if state.OwnGroups != nil {
+		copy.OwnGroups = append([]GroupOption(nil), state.OwnGroups...)
+	}
+	return &copy
+}
+
+func targetKey(siteID string, groupName string) string {
+	return strings.TrimSpace(siteID) + "\x00" + strings.TrimSpace(groupName)
+}
+
+func (s *Service) authoritativeMissingTargets(ctx context.Context, userID string, adminAccountID string, mappings []GroupMapping) map[string]struct{} {
+	missing := map[string]struct{}{}
+	seen := map[string]struct{}{}
+	for _, mapping := range mappings {
+		for _, target := range mapping.UpstreamTargets {
+			key := targetKey(target.SiteID, target.GroupName)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			site, err := s.upstreamLookup.GetSite(ctx, target.SiteID)
+			if err != nil || site == nil || site.UserID != userID || site.AdminAccountID != adminAccountID || site.Status != upstream.StatusConnected || site.LastSyncedAt == nil {
+				continue
+			}
+			if !hasUpstreamGroup(site.Metrics.Groups, target.GroupName) {
+				missing[key] = struct{}{}
+			}
+		}
+	}
+	return missing
+}
+
+func pruneTargetsByKey(targets []UpstreamGroupRef, missing map[string]struct{}) []UpstreamGroupRef {
+	if len(missing) == 0 {
+		return targets
+	}
+	cleaned := make([]UpstreamGroupRef, 0, len(targets))
+	for _, target := range targets {
+		if _, drop := missing[targetKey(target.SiteID, target.GroupName)]; drop {
+			continue
+		}
+		cleaned = append(cleaned, target)
+	}
+	return cleaned
+}
+
+func removeMappingTargetFromState(state *State, siteID string, groupName string) {
+	if state == nil || len(state.Mappings) == 0 {
+		return
+	}
+	cleaned := make([]GroupMapping, 0, len(state.Mappings))
+	for _, mapping := range state.Mappings {
+		targets := make([]UpstreamGroupRef, 0, len(mapping.UpstreamTargets))
+		for _, target := range mapping.UpstreamTargets {
+			if target.SiteID == siteID && target.GroupName == groupName {
+				continue
+			}
+			targets = append(targets, target)
+		}
+		if len(targets) > 0 {
+			mapping.UpstreamTargets = targets
+			cleaned = append(cleaned, mapping)
+		}
+	}
+	state.Mappings = cleaned
+}
+
 // changedGroup 表示一个上游分组在同步前后倍率发生了变化。
 type changedGroup struct {
 	GroupName     string
@@ -1114,9 +1297,15 @@ type autoPricingResult struct {
 	OwnGroup         string
 	OldReference     float64
 	NewReference     float64
+	OldReferenceSet  bool
+	NewReferenceSet  bool
+	OldOwnMultiplier *float64
+	NewOwnMultiplier *float64
 	TargetMultiplier float64
+	TargetSet        bool
 	Status           string // applied, threshold_exceeded, skipped, failed
 	Reason           string
+	PersistError     error
 }
 
 // percentEpsilon 阈值比较的浮点容差，避免 IEEE 754 精度问题把刚好等于阈值的变化误判为超限。
@@ -1211,6 +1400,85 @@ func (s *Service) buildLookupMultiplier(ctx context.Context) func(siteID, groupN
 		}
 		return findGroupMultiplier(site.Metrics.Groups, groupName)
 	}
+}
+
+// buildWorkspaceLookupMultiplier 只读取当前用户和当前 workspace 的上游缓存，避免跨工作区引用倍率。
+func (s *Service) buildWorkspaceLookupMultiplier(ctx context.Context, userID string, adminAccountID string) func(siteID, groupName string) *float64 {
+	return func(siteID, groupName string) *float64 {
+		site, err := s.upstreamLookup.GetSite(ctx, siteID)
+		if err != nil || site == nil || site.UserID != userID || site.AdminAccountID != adminAccountID || site.Status != upstream.StatusConnected || site.LastSyncedAt == nil {
+			return nil
+		}
+		return findGroupMultiplier(site.Metrics.Groups, groupName)
+	}
+}
+
+// pruneAuthoritativeMissingTargets 只在本地上游缓存可被视为权威时移除缺失目标。
+// 缺失站点、离线/错误站点、从未成功同步的站点都保留目标，避免误删暂时不可确认的映射。
+func (s *Service) pruneAuthoritativeMissingTargets(ctx context.Context, userID string, adminAccountID string, targets []UpstreamGroupRef) []UpstreamGroupRef {
+	cleaned := make([]UpstreamGroupRef, 0, len(targets))
+	for _, target := range targets {
+		site, err := s.upstreamLookup.GetSite(ctx, target.SiteID)
+		if err != nil || site == nil || site.UserID != userID || site.AdminAccountID != adminAccountID || site.Status != upstream.StatusConnected || site.LastSyncedAt == nil {
+			cleaned = append(cleaned, target)
+			continue
+		}
+		if hasUpstreamGroup(site.Metrics.Groups, target.GroupName) {
+			cleaned = append(cleaned, target)
+		}
+	}
+	return cleaned
+}
+
+func hasUpstreamGroup(groups []upstream.GroupInfo, groupName string) bool {
+	for _, group := range groups {
+		if group.Name == groupName {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizedOwnGroupKey(ownGroup string) string {
+	return strings.ToLower(strings.TrimSpace(ownGroup))
+}
+
+func mergeLastAutoPricingRunByOwnGroup(next []GroupMapping, existing []GroupMapping) {
+	statusByOwnGroup := make(map[string]*AutoPricingRunStatus, len(existing))
+	for _, mapping := range existing {
+		if mapping.LastAutoPricingRun != nil {
+			statusByOwnGroup[normalizedOwnGroupKey(mapping.OwnGroup)] = mapping.LastAutoPricingRun
+		}
+	}
+	for i := range next {
+		if status := statusByOwnGroup[normalizedOwnGroupKey(next[i].OwnGroup)]; status != nil {
+			next[i].LastAutoPricingRun = status
+		}
+	}
+}
+
+func findMappingByOwnGroup(mappings []GroupMapping, ownGroup string) (GroupMapping, bool) {
+	key := normalizedOwnGroupKey(ownGroup)
+	for _, mapping := range mappings {
+		if normalizedOwnGroupKey(mapping.OwnGroup) == key {
+			return mapping, true
+		}
+	}
+	return GroupMapping{}, false
+}
+
+func findMappingIndexByOwnGroup(mappings []GroupMapping, ownGroup string) int {
+	key := normalizedOwnGroupKey(ownGroup)
+	for i, mapping := range mappings {
+		if normalizedOwnGroupKey(mapping.OwnGroup) == key {
+			return i
+		}
+	}
+	return -1
+}
+
+func pointerFloat64(value float64) *float64 {
+	return &value
 }
 
 // findGroupMultiplier 在分组列表中按 Name 查找倍率。
@@ -1326,7 +1594,7 @@ func (s *Service) ApplyAutoPricingAfterSync(ctx context.Context, userID, adminAc
 	}
 
 	// 5. 遍历自动调价 mappings（非 changes×mappings），每个 mapping 最多处理一次
-	lookupFn := s.buildLookupMultiplier(ctx)
+	lookupFn := s.buildWorkspaceLookupMultiplier(ctx, userID, adminAccountID)
 	for _, mapping := range autoPricingMappings {
 		// 检查该 mapping 是否引用了本次同步站点中发生变化的任意上游分组
 		affected := false
@@ -1342,7 +1610,7 @@ func (s *Service) ApplyAutoPricingAfterSync(ctx context.Context, userID, adminAc
 			continue
 		}
 
-		result := s.processAutoPricing(ctx, userID, state, mapping, siteID, siteName, changesByGroup, newMetrics.Groups, adminGroupMap, lookupFn)
+		result := s.processAutoPricing(ctx, userID, adminAccountID, state, mapping, siteID, siteName, changesByGroup, newMetrics.Groups, adminGroupMap, lookupFn)
 		logAutoPricingResult(siteName, result)
 	}
 }
@@ -1377,8 +1645,22 @@ func buildChangesByGroup(oldMetrics, newMetrics upstream.Metrics) map[string]gro
 // processAutoPricing 处理单个 mapping 的自动调价逻辑。
 // 使用 changesByGroup 快照和 newMetricsGroups 计算参考倍率，保证每个 mapping 只处理一次。
 // siteName 为触发同步的上游站点名称，用于调价成功通知的模板变量。
-func (s *Service) processAutoPricing(ctx context.Context, userID string, state *State, mapping GroupMapping, siteID, siteName string, changesByGroup map[string]groupMultiplierChange, newMetricsGroups []upstream.GroupInfo, adminGroupMap map[string]upstream.AdminGroupInfo, lookupFn func(string, string) *float64) autoPricingResult {
-	result := autoPricingResult{OwnGroup: mapping.OwnGroup}
+func (s *Service) processAutoPricing(ctx context.Context, userID string, adminAccountID string, state *State, mapping GroupMapping, siteID, siteName string, changesByGroup map[string]groupMultiplierChange, newMetricsGroups []upstream.GroupInfo, adminGroupMap map[string]upstream.AdminGroupInfo, lookupFn func(string, string) *float64) (result autoPricingResult) {
+	result = autoPricingResult{OwnGroup: mapping.OwnGroup}
+	defer func() {
+		if result.Status == "" {
+			return
+		}
+		var updatedMultiplier *float64
+		if result.Status == "applied" {
+			updatedMultiplier = pointerFloat64(result.TargetMultiplier)
+		}
+		if _, err := s.persistAutoPricingRunStatus(ctx, userID, adminAccountID, result, "after_sync", updatedMultiplier); err != nil {
+			result.PersistError = err
+			result.Status = "failed"
+			result.Reason = "status_persist_failed"
+		}
+	}()
 
 	// 计算参考倍率（纯函数，不依赖缓存读取本次同步站点的数据）
 	oldRef, newRef, ok, reason := computeReferenceMultipliers(
@@ -1397,6 +1679,8 @@ func (s *Service) processAutoPricing(ctx context.Context, userID string, state *
 	}
 	result.OldReference = oldRef
 	result.NewReference = newRef
+	result.OldReferenceSet = true
+	result.NewReferenceSet = true
 
 	// 阈值判断：oldRef <= 0 防除零，thresholdExceeded 使用 epsilon 消除浮点误判
 	if oldRef <= 0 {
@@ -1405,15 +1689,15 @@ func (s *Service) processAutoPricing(ctx context.Context, userID string, state *
 		return result
 	}
 	if thresholdExceeded(oldRef, newRef, mapping.AdjustThresholdPercent) {
-		changePercent := math.Abs(newRef-oldRef) / oldRef * 100
 		result.Status = "threshold_exceeded"
-		result.Reason = fmt.Sprintf("change=%.2f%% threshold=%.2f%%", changePercent, mapping.AdjustThresholdPercent)
+		result.Reason = "threshold_exceeded"
 		return result
 	}
 
 	// 计算目标倍率
 	target := calculateAutoPricingTarget(mapping, newRef)
 	result.TargetMultiplier = target
+	result.TargetSet = true
 
 	// 查找 admin 端对应的自有分组
 	adminGroup, found := adminGroupMap[mapping.OwnGroup]
@@ -1422,11 +1706,13 @@ func (s *Service) processAutoPricing(ctx context.Context, userID string, state *
 		result.Reason = "own_group_not_found_in_admin"
 		return result
 	}
+	result.OldOwnMultiplier = adminGroup.Multiplier
 
 	// 检查目标倍率是否与当前一致
 	if adminGroup.Multiplier != nil && math.Round(*adminGroup.Multiplier*10000)/10000 == target {
 		result.Status = "skipped"
 		result.Reason = "target_unchanged"
+		result.NewOwnMultiplier = adminGroup.Multiplier
 		return result
 	}
 
@@ -1435,8 +1721,10 @@ func (s *Service) processAutoPricing(ctx context.Context, userID string, state *
 
 	// 调用远端 API 更新倍率
 	if err := s.platformService.UpdateAdminGroupMultiplier(state.Session, adminGroup, target); err != nil {
+		log.Printf("[auto-pricing] 远端倍率更新失败 own_group=%s target=%.4f err=%v", mapping.OwnGroup, target, err)
 		result.Status = "failed"
-		result.Reason = err.Error()
+		result.Reason = "remote_update_failed"
+		result.NewOwnMultiplier = adminGroup.Multiplier
 		return result
 	}
 
@@ -1447,8 +1735,7 @@ func (s *Service) processAutoPricing(ctx context.Context, userID string, state *
 			break
 		}
 	}
-	_ = s.repository.Save(ctx, *state)
-
+	result.NewOwnMultiplier = pointerFloat64(target)
 	result.Status = "applied"
 
 	// 自动调价成功后发送通知（仅在开启通知且配置了机器人时）
@@ -1460,8 +1747,148 @@ func (s *Service) processAutoPricing(ctx context.Context, userID string, state *
 	return result
 }
 
+// processManualAutoPricing 使用当前缓存倍率执行一次手动自动调价，并持久化本次运行状态。
+func (s *Service) processManualAutoPricing(ctx context.Context, userID string, adminAccountID string, state *State, mapping GroupMapping, adminGroupMap map[string]upstream.AdminGroupInfo, lookupFn func(string, string) *float64) (autoPricingResult, GroupMapping, error) {
+	result := autoPricingResult{OwnGroup: mapping.OwnGroup}
+	ref, ok, reason := computeCurrentReferenceMultiplier(mapping, lookupFn)
+	if !ok {
+		result.Status = "skipped"
+		result.Reason = reason
+		updated, err := s.persistAutoPricingRunStatus(ctx, userID, adminAccountID, result, "manual", nil)
+		return result, updated, err
+	}
+	result.NewReference = ref
+	result.NewReferenceSet = true
+	target := calculateAutoPricingTarget(mapping, ref)
+	result.TargetMultiplier = target
+	result.TargetSet = true
+
+	adminGroup, found := adminGroupMap[mapping.OwnGroup]
+	if !found {
+		result.Status = "skipped"
+		result.Reason = "own_group_not_found_in_admin"
+		updated, err := s.persistAutoPricingRunStatus(ctx, userID, adminAccountID, result, "manual", nil)
+		return result, updated, err
+	}
+	oldOwnMultiplier := adminGroup.Multiplier
+	result.OldOwnMultiplier = oldOwnMultiplier
+	if adminGroup.Multiplier != nil && math.Round(*adminGroup.Multiplier*10000)/10000 == target {
+		result.Status = "skipped"
+		result.Reason = "target_unchanged"
+		result.NewOwnMultiplier = adminGroup.Multiplier
+		updated, err := s.persistAutoPricingRunStatus(ctx, userID, adminAccountID, result, "manual", nil)
+		return result, updated, err
+	}
+	if err := s.platformService.UpdateAdminGroupMultiplier(state.Session, adminGroup, target); err != nil {
+		log.Printf("[auto-pricing] 手动运行远端倍率更新失败 own_group=%s target=%.4f err=%v", mapping.OwnGroup, target, err)
+		result.Status = "failed"
+		result.Reason = "remote_update_failed"
+		result.NewOwnMultiplier = adminGroup.Multiplier
+		updated, persistErr := s.persistAutoPricingRunStatus(ctx, userID, adminAccountID, result, "manual", nil)
+		return result, updated, persistErr
+	}
+	result.NewOwnMultiplier = pointerFloat64(target)
+	result.Status = "applied"
+	updated, err := s.persistAutoPricingRunStatus(ctx, userID, adminAccountID, result, "manual", pointerFloat64(target))
+	if err != nil {
+		return result, GroupMapping{}, err
+	}
+	if mapping.EnableAutoPricingNotify && len(mapping.AutoPricingNotifyBotIDs) > 0 && s.botNotifier != nil {
+		msg := formatAutoPricingNotify(mapping, "manual", result, oldOwnMultiplier)
+		s.botNotifier.SendToBots(ctx, userID, mapping.AutoPricingNotifyBotIDs, msg)
+	}
+	return result, updated, nil
+}
+
+// computeCurrentReferenceMultiplier 计算手动运行需要的当前参考倍率，不使用同步阈值或旧值快照。
+func computeCurrentReferenceMultiplier(mapping GroupMapping, lookupFn func(string, string) *float64) (float64, bool, string) {
+	switch mapping.AutoPricingSource {
+	case "primary_upstream":
+		if strings.TrimSpace(mapping.PrimaryUpstreamSiteID) == "" || strings.TrimSpace(mapping.PrimaryUpstreamGroupName) == "" {
+			return 0, false, "invalid_auto_pricing_config"
+		}
+		multiplier := lookupFn(mapping.PrimaryUpstreamSiteID, mapping.PrimaryUpstreamGroupName)
+		if multiplier == nil {
+			return 0, false, "missing_reference_multiplier"
+		}
+		return *multiplier, true, ""
+	case "lowest_upstream", "highest_upstream", "average_upstream":
+		multipliers := make([]float64, 0, len(mapping.UpstreamTargets))
+		for _, target := range mapping.UpstreamTargets {
+			multiplier := lookupFn(target.SiteID, target.GroupName)
+			if multiplier == nil {
+				return 0, false, "missing_reference_multiplier"
+			}
+			multipliers = append(multipliers, *multiplier)
+		}
+		if len(multipliers) == 0 {
+			return 0, false, "missing_reference_multiplier"
+		}
+		return aggregateMultipliers(mapping.AutoPricingSource, multipliers), true, ""
+	default:
+		return 0, false, "unknown_pricing_source"
+	}
+}
+
+func autoPricingStatusFromResult(result autoPricingResult, trigger string, ranAt time.Time) AutoPricingRunStatus {
+	status := AutoPricingRunStatus{
+		Status:  result.Status,
+		Reason:  result.Reason,
+		Trigger: trigger,
+		RanAt:   ranAt,
+	}
+	if result.OldReferenceSet {
+		status.OldReference = pointerFloat64(result.OldReference)
+	}
+	if result.NewReferenceSet {
+		status.NewReference = pointerFloat64(result.NewReference)
+	}
+	status.OldOwnMultiplier = result.OldOwnMultiplier
+	status.NewOwnMultiplier = result.NewOwnMultiplier
+	if result.TargetSet {
+		status.TargetMultiplier = pointerFloat64(result.TargetMultiplier)
+	}
+	return status
+}
+
+// persistAutoPricingRunStatus 重读当前 JSON 状态后只合并服务端运行状态，降低整段 mappings 覆盖的并发风险。
+func (s *Service) persistAutoPricingRunStatus(ctx context.Context, userID string, adminAccountID string, result autoPricingResult, trigger string, updatedOwnMultiplier *float64) (GroupMapping, error) {
+	var updated GroupMapping
+	latest, err := s.mutateState(ctx, userID, adminAccountID, func(latest *State) error {
+		index := findMappingIndexByOwnGroup(latest.Mappings, result.OwnGroup)
+		if index < 0 {
+			return requestError(ErrorRequest)
+		}
+		latest.Mappings[index].LastAutoPricingRun = pointerAutoPricingRunStatus(autoPricingStatusFromResult(result, trigger, time.Now()))
+		if updatedOwnMultiplier != nil {
+			for i, group := range latest.OwnGroups {
+				if normalizedOwnGroupKey(group.Name) == normalizedOwnGroupKey(result.OwnGroup) {
+					latest.OwnGroups[i].Multiplier = *updatedOwnMultiplier
+					break
+				}
+			}
+		}
+		updated = cloneGroupMappingValue(latest.Mappings[index])
+		return nil
+	})
+	if err != nil {
+		return GroupMapping{}, err
+	}
+	if latest == nil {
+		return GroupMapping{}, requestError(ErrorRequest)
+	}
+	return updated, nil
+}
+
+func pointerAutoPricingRunStatus(status AutoPricingRunStatus) *AutoPricingRunStatus {
+	return &status
+}
+
 // logAutoPricingResult 记录自动调价执行结果日志。
 func logAutoPricingResult(siteName string, result autoPricingResult) {
+	if result.PersistError != nil {
+		log.Printf("[auto-pricing] 状态持久化失败 site=%s own_group=%s err=%v", siteName, result.OwnGroup, result.PersistError)
+	}
 	switch result.Status {
 	case "applied":
 		log.Printf("[auto-pricing] 已更新倍率 site=%s own_group=%s old_ref=%.4f new_ref=%.4f target=%.4f",

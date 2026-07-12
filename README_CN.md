@@ -110,7 +110,7 @@ git clone https://github.com/deviseo/transit-hub.git transit-hub
 cd transit-hub
 
 # 先编辑 deploy/docker-compose.prod.yml：
-# - 镜像 tag（默认使用 deviseo/transithub:v0.1.4）
+# - 镜像 tag（默认使用 deviseo/transithub:v0.1.6）
 # - 替换所有 change-this-* 占位值
 # - DATABASE_URL 和 POSTGRES_PASSWORD 中的数据库密码
 # - ADMIN_EMAIL / ADMIN_PASSWORD
@@ -140,6 +140,14 @@ data/ticket-uploads
 
 `data/ticket-uploads` 存放工单图片附件（挂载到 `app` 容器的 `TICKET_UPLOAD_DIR`，默认 `/app/data/ticket-uploads`），不会作为公开静态目录对外暴露。重建 `app` 容器前请确认该 volume 已存在，否则图片文件会丢失（数据库里的附件 metadata 不受影响）。
 
+`SMTP_ENCRYPTION_KEY` 是可选环境变量，仅当需要在「系统设置 - 邮件设置」中保存 SMTP 密码或发送测试邮件时才需要配置。缺失该变量不会阻止应用启动，也不影响任何非 SMTP 功能。生成方式：
+
+```bash
+openssl rand -base64 32
+```
+
+该值必须是 base64 编码的 32 字节随机值，且一经设置需要长期稳定保存；更换 key 后，旧的 SMTP 密码密文将无法解密，需要重新填写并保存密码。
+
 ### 开发依赖服务
 
 本地开发只启动 PostgreSQL 和 Redis：
@@ -155,7 +163,7 @@ docker compose -f deploy/docker-compose.yml up -d
 由于 Dockerfile 放在 `deploy/`，但构建上下文需要使用仓库根目录，请使用：
 
 ```bash
-docker build -f deploy/Dockerfile -t deviseo/transithub:v0.1.4 .
+docker build -f deploy/Dockerfile -t deviseo/transithub:v0.1.6 .
 ```
 
 ## 本地开发
@@ -234,21 +242,23 @@ transit-hub/
 │   └── src/modules/          # 前端业务模块
 ├── deploy/                   # Dockerfile 和 Compose 文件
 ├── development-docs/         # 开发说明和实现规划
-└── data/                     # 本地生产数据目录，Git 忽略
+└── data/                     # 持久化运行数据
 ```
 
-## 项目说明
+## 核心工作流
 
-- 后台展示版本号由发布代码内置，部署用户不可通过环境变量自定义。
-- `AGENTS.md`、`CLAUDE.md`、`.sisyphus/`、本地 `.env`、构建产物和运行时数据均会被 Git 忽略。
+- 工作区隔离的多上游运营：每个 admin workspace 独立管理，可连接多个 sub2api/new-api 上游并执行同步与账号管理。
+- 分组倍率工作流：跟踪最新上游倍率，支持搜索和筛选、分组关联，以及按活动组织调价。
+- 已对接分组自动调价：支持手动或同步后执行，可配置策略、查看执行状态并发送通知。
+- 日常运维面板：覆盖仪表盘指标、连接健康、工单和邮件/模板管理。
 
 ## Star History 星际历史
 
-<a href="https://star-history.com/#deviseo/transit-hub&Date">
+<a href="https://github.com/deviseo/transit-hub/stargazers">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=deviseo/transit-hub&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=deviseo/transit-hub&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=deviseo/transit-hub&type=Date" />
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/star-history-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/star-history-light.svg" />
+    <img alt="TransitHub Star 趋势图" src="docs/assets/star-history-light.svg" />
   </picture>
 </a>
 

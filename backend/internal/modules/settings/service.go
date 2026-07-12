@@ -3,6 +3,7 @@ package settings
 import (
 	"bytes"
 	"context"
+	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -31,11 +32,32 @@ var (
 	ErrSendNotificationFailed     = errors.New("admin.settings.errors.sendFailed")
 )
 
+// SMTP 错误 sentinel：handler 用 errors.Is 逐一映射到固定状态码，详见 handler.go writeSmtpError。
+var (
+	ErrSMTPValidation               = errors.New("admin.settings.smtp.errors.validation")
+	ErrSMTPMissingConfig            = errors.New("admin.settings.smtp.errors.missingConfig")
+	ErrSMTPInvalidTLSMode           = errors.New("admin.settings.smtp.errors.invalidTlsMode")
+	ErrSMTPInvalidEmail             = errors.New("admin.settings.smtp.errors.invalidEmail")
+	ErrSMTPEncryptionKeyUnavailable = errors.New("admin.settings.smtp.errors.encryptionKeyUnavailable")
+	ErrSMTPDecryptFailed            = errors.New("admin.settings.smtp.errors.decryptFailed")
+	ErrSMTPSendFailed               = errors.New("admin.settings.smtp.errors.sendFailed")
+	ErrSMTPPersistence              = errors.New("admin.settings.smtp.errors.persistence")
+)
+
 type Service struct {
 	client            *http.Client
 	repository        *Repository
 	accounts          AdminAccountResolver
 	OnStrategyChanged func(StrategySettings)
+
+	// smtpRepo 是 SMTP 存储层的窄接口，由 *Repository 结构性满足；测试可注入内存 fake。
+	smtpRepo smtpRepository
+	// smtpKeyGCM 为 nil 表示 SMTP_ENCRYPTION_KEY 未配置，此时禁止保存非空密码或解密已保存密码。
+	smtpKeyGCM cipher.AEAD
+	// smtpSender 默认使用生产实现；测试可注入 fake sender 以避免依赖真实外部 SMTP 服务。
+	smtpSender smtpSender
+	// emailTemplateRepo 是邮件模板存储层窄接口，测试通过内存 fake 覆盖 workspace 隔离和限制规则。
+	emailTemplateRepo emailTemplateRepository
 }
 
 type AdminAccountResolver interface {
@@ -46,7 +68,7 @@ func NewService(client *http.Client, repository *Repository) *Service {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	return &Service{client: client, repository: repository}
+	return &Service{client: client, repository: repository, smtpRepo: repository, emailTemplateRepo: repository}
 }
 
 func (s *Service) SetAdminAccountResolver(accounts AdminAccountResolver) {

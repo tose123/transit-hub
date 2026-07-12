@@ -18,6 +18,7 @@ func RegisterRoutes(mux *http.ServeMux, service *Service) {
 	handler := &Handler{service: service}
 	mux.HandleFunc("GET /api/my-sites/mapping-options", handler.mappingOptions)
 	mux.HandleFunc("PUT /api/my-sites/mappings", handler.saveMappings)
+	mux.HandleFunc("POST /api/my-sites/auto-pricing/run", handler.runAutoPricing)
 	mux.HandleFunc("POST /api/my-sites/real-connect", handler.realConnect)
 	mux.HandleFunc("POST /api/my-sites/real-bind", handler.realBind)
 	mux.HandleFunc("GET /api/my-sites/upstream-keys", handler.listUpstreamKeys)
@@ -53,6 +54,25 @@ func (h *Handler) saveMappings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response, err := h.service.SaveMappings(r.Context(), userID, dto.Mappings)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, response)
+}
+
+func (h *Handler) runAutoPricing(w http.ResponseWriter, r *http.Request) {
+	userID, ok := authctx.UserID(r.Context())
+	if !ok {
+		httpjson.WriteError(w, http.StatusUnauthorized, "auth.errors.unauthorized")
+		return
+	}
+	var req AutoPricingRunRequest
+	if err := httpjson.Decode(r, &req); err != nil {
+		httpjson.WriteError(w, http.StatusBadRequest, ErrorRequest)
+		return
+	}
+	response, err := h.service.RunAutoPricingNow(r.Context(), userID, req)
 	if err != nil {
 		writeError(w, err)
 		return

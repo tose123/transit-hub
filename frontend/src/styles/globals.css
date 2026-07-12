@@ -17,6 +17,8 @@
     --accent-foreground: 0 0% 100%;
     --signal: 143 86% 42%;
     --signal-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
     --warning: 39 96% 46%;
     --warning-foreground: 0 0% 100%;
     --secondary: 210 40% 96.1%;
@@ -40,6 +42,8 @@
     --accent-foreground: 220 58% 5%;
     --signal: 143 86% 52%;
     --signal-foreground: 220 58% 5%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
     --warning: 39 96% 56%;
     --warning-foreground: 220 58% 5%;
     --secondary: 217.2 32.6% 17.5%;

@@ -11,7 +11,7 @@ const (
 	defaultPort       = "10621"
 	defaultRedisURL   = "redis://127.0.0.1:6379/0"
 	defaultPublicDir  = "/app/public"
-	defaultAppVersion = "v0.1.4"
+	defaultAppVersion = "v0.1.6"
 )
 
 type Config struct {
@@ -42,6 +42,10 @@ type Config struct {
 
 	// 工单图片附件本地存储目录：只存文件本身，metadata 落库；目录不存在时自动创建。
 	TicketUploadDir string
+
+	// SMTP 密码加密密钥：base64 编码的 32 字节 AES-256-GCM key，由 settings 模块解析和校验。
+	// 应用启动时是可选项，缺失不影响启动；这里只原样读取环境变量原值，不做任何解析或校验。
+	SMTPEncryptionKey string
 }
 
 func Load() Config {
@@ -73,6 +77,8 @@ func Load() Config {
 		GroupRateCampaignSchedulerInterval: envDuration("GROUP_RATE_CAMPAIGN_SCHEDULER_INTERVAL", 60*time.Second),
 
 		TicketUploadDir: envOrDefault("TICKET_UPLOAD_DIR", "data/ticket-uploads"),
+
+		SMTPEncryptionKey: os.Getenv("SMTP_ENCRYPTION_KEY"),
 	}
 }
 

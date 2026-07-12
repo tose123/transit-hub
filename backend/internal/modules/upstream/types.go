@@ -256,6 +256,32 @@ type Sub2APIAdminUser struct {
 	LastUsedAt    *time.Time
 }
 
+// Sub2APIAdminUsersQuery 是 Sub2API admin 用户分页列表的安全查询对象。
+// 调用方只能通过这些显式字段影响远端查询，PlatformService 会继续做白名单和分页夹紧。
+type Sub2APIAdminUsersQuery struct {
+	Page      int
+	PageSize  int
+	Status    string
+	Role      string
+	Search    string
+	SortBy    string
+	SortOrder string
+	Timezone  string
+}
+
+type Sub2APIAdminUsersPage struct {
+	Items    []Sub2APIAdminUser
+	Total    int
+	Page     int
+	PageSize int
+	Pages    int
+	// TotalKnown/PagesKnown let batch jobs distinguish real upstream pagination
+	// metadata from local fallbacks, so all-mode jobs never silently truncate an
+	// unknown-length user stream.
+	TotalKnown bool
+	PagesKnown bool
+}
+
 // Sub2APIBalanceHistoryItem 是 Sub2API 用户余额/充值历史中的单条记录。
 type Sub2APIBalanceHistoryItem struct {
 	ID        string

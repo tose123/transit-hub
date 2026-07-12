@@ -109,7 +109,9 @@ export default {
       toggleLanguage: 'Toggle language',
       toggleTheme: 'Toggle theme',
       userProfile: 'User profile',
-      switchWorkspace: 'Switch Workspace'
+      switchWorkspace: 'Switch Workspace',
+      openNavigation: 'Open navigation',
+      closeNavigation: 'Close navigation'
     },
     menu: {
       dashboard: 'Dashboard',
@@ -121,6 +123,7 @@ export default {
       groupRateCampaigns: 'Rate Campaigns',
       settings: 'Settings',
       tickets: 'Tickets',
+      massEmail: 'Mass Email',
       signOut: 'Sign Out'
     },
     adminAccounts: {
@@ -131,9 +134,23 @@ export default {
       addWorkspace: 'Add Workspace',
       addWorkspaceHint: 'Connect a new site admin account',
       creating: 'Creating workspace...',
+      delete: {
+        actionLabel: 'Delete workspace {name}',
+        title: 'Delete {name}',
+        localDataWarning: 'All TransitHub local workspace data for this workspace will be permanently deleted. This cannot be undone.',
+        remoteResourcesRetained: 'Remote upstream resources and accounts are retained and will not be deleted.',
+        phraseInstruction: 'Type the exact phrase below to confirm: {phrase}',
+        inputLabel: 'Confirmation phrase',
+        inputPlaceholder: 'Type the phrase manually',
+        cancel: 'Cancel',
+        confirm: 'Delete Workspace',
+        deleting: 'Deleting...',
+        cleanupPending: 'Workspace deletion completed, but local runtime, cache, or file cleanup is still pending and will retry.'
+      },
       errors: {
         noCurrentAccount: 'Please select a workspace first.',
         notFound: 'Workspace not found.',
+        deleteFailed: 'Workspace deletion failed. Type the confirmation phrase again and retry.',
         request: 'Operation failed. Please try again.',
         network: 'Network error. Check your connection and try again.'
       }
@@ -306,10 +323,13 @@ export default {
     },
     groupAssociations: {
       title: 'Group Mappings',
-      subtitle: '{count} mappings total',
+      subtitle: '{count} groups · {associated} associated · {unassociated} unassociated',
       close: 'Close',
       empty: 'No group mappings found.',
       loadError: 'Failed to load group list.',
+      runError: 'Failed to run auto-pricing. Please try again.',
+      unassociatedLabel: 'No upstream linked',
+      unassociatedMultiplier: 'Not available',
       columns: {
         index: '#',
         ownGroup: 'Own Group',
@@ -337,7 +357,36 @@ export default {
       },
       autoPricingActions: {
         configure: 'Configure',
-        edit: 'Edit'
+        edit: 'Edit',
+        runNow: 'Run Now',
+        runNowFor: 'Run auto-pricing now for {group}'
+      },
+      lastRun: {
+        never: 'Never',
+        summary: 'Last: {status} · {trigger} · {time}',
+        reason: 'Reason: {reason}',
+        triggerManual: 'Manual',
+        triggerAfterSync: 'After sync',
+        triggerUnknown: 'Unknown trigger',
+        reasonUnknown: 'No details available',
+        status: {
+          applied: 'Success',
+          skipped: 'Skipped',
+          thresholdExceeded: 'Threshold exceeded',
+          failed: 'Failed',
+          unknown: 'No run'
+        },
+        reasons: {
+          primary_upstream_not_affected: 'Primary upstream was not affected by the sync.',
+          missing_reference_multiplier: 'Reference multiplier is missing.',
+          unknown_pricing_source: 'Pricing source is not recognized.',
+          status_persist_failed: 'Run status could not be saved.',
+          invalid_old_reference_multiplier: 'Previous reference multiplier is invalid.',
+          threshold_exceeded: 'Change exceeded the configured threshold.',
+          own_group_not_found_in_admin: 'Own group was not found in the admin site.',
+          target_unchanged: 'Target multiplier was unchanged.',
+          remote_update_failed: 'Remote multiplier update failed.'
+        }
       },
       autoPricingDrawer: {
         title: 'Auto-Pricing Config',
@@ -1037,7 +1086,8 @@ export default {
       errors: {
         network: 'Network or CORS request failed. Check the API URL and cross-origin settings.',
         request: 'The group rates API request failed. Try again later.',
-        unknown: 'An unknown error occurred while loading group rates.'
+        unknown: 'An unknown error occurred while loading group rates.',
+        refreshFailed: 'The change was saved, but the list refresh failed. Refresh again to update the view.'
       }
     },
     groupRateCampaigns: {
@@ -1330,6 +1380,156 @@ export default {
         }
       }
     },
+    massEmail: {
+      common: {
+        placeholder: '-'
+      },
+      filters: {
+        search: 'Search users',
+        searchPlaceholder: 'Enter an email keyword',
+        noSearch: 'No search term',
+        status: 'User Status',
+        role: 'Role',
+        allStatuses: 'All statuses',
+        allRoles: 'All roles'
+      },
+      template: {
+        label: 'Email Template',
+        placeholder: 'Select a template',
+        noSubject: 'No subject selected'
+      },
+      selection: {
+        title: 'Recipient Selection',
+        count: '{count} selected across pages',
+        selectPage: 'Select all users on this page',
+        selectUser: 'Select {email}'
+      },
+      users: {
+        title: 'Recipients'
+      },
+      fields: {
+        email: 'Email',
+        role: 'Role',
+        status: 'Status',
+        createdAt: 'Created',
+        actions: 'Actions'
+      },
+      roles: {
+        user: 'User',
+        admin: 'Admin'
+      },
+      userStatus: {
+        active: 'Active',
+        disabled: 'Disabled',
+        inactive: 'Inactive',
+        banned: 'Banned'
+      },
+      actions: {
+        search: 'Search',
+        clearSearch: 'Clear search',
+        refresh: 'Refresh',
+        clearSelection: 'Clear',
+        sendSelected: 'Send selected',
+        sendPage: 'Send page',
+        sendFilter: 'Send filter',
+        sendRow: 'Send',
+        cancelBatch: 'Cancel',
+        closeConfirm: 'Close confirmation',
+        openBatches: 'Batches',
+        openBatchDetail: 'Details',
+        previewTemplate: 'Preview'
+      },
+      status: {
+        loadingUsers: 'Loading recipients...',
+        loadingItems: 'Loading outcomes...'
+      },
+      batchStatus: {
+        queued: 'Queued',
+        running: 'Running',
+        completed: 'Completed',
+        completed_with_errors: 'Completed with errors',
+        failed: 'Failed',
+        cancelled: 'Cancelled',
+        cancelling: 'Cancelling'
+      },
+      itemStatus: {
+        pending: 'Pending',
+        sending: 'Sending',
+        sent: 'Sent',
+        failed: 'Failed',
+        uncertain: 'Uncertain',
+        cancelled: 'Cancelled'
+      },
+      empty: {
+        usersTitle: 'No recipients match this filter',
+        usersDescription: 'Change the search, status, or role filter and try again.',
+        batches: 'No mass-email batches yet.',
+        detail: 'Select a batch to view recipient outcomes.'
+      },
+      pagination: {
+        total: '{total} total',
+        pageSize: '{pageSize} per page',
+        currentPage: 'Page {page} of {totalPages}',
+        previous: 'Previous',
+        next: 'Next'
+      },
+      batches: {
+        title: 'Batches',
+        active: '{count} active',
+        progress: '{done}/{total} done, {percent}%',
+        close: 'Close batches'
+      },
+      detail: {
+        title: 'Batch Detail',
+        recipients: '{total} recipient outcomes',
+        close: 'Close batch detail'
+      },
+      preview: {
+        title: 'Template Preview',
+        close: 'Close preview',
+        iframeTitle: 'Email template preview'
+      },
+      summary: {
+        sent: 'Sent',
+        failed: 'Failed',
+        uncertain: 'Uncertain',
+        cancelled: 'Cancelled'
+      },
+      confirm: {
+        selectedTitle: 'Send email to selected recipients?',
+        selectedDescription: 'This will create a mass-email batch for {count} selected recipients.',
+        allTitle: 'Send email to all recipients in the current filter?',
+        allDescription: 'This will create a mass-email batch for {count} recipients matching the current filter.',
+        recipients: 'Recipients: {count}',
+        template: 'Template: {name}',
+        filters: 'Filters: {status}, {role}, search: {search}',
+        cancel: 'Cancel',
+        submit: 'Create batch'
+      },
+      success: {
+        created: 'Mass-email batch created.',
+        cancelled: 'Batch cancellation requested.'
+      },
+      errors: {
+        network: 'Network or CORS request failed. Check the API URL and cross-origin settings.',
+        request: 'Mass-email request failed. Try again later.',
+        templates: 'Failed to load email templates.',
+        unknown: 'An unknown error occurred while loading mass-email data.',
+        invalidRequest: 'The mass-email request is invalid.',
+        invalidSelection: 'Select at least one valid recipient.',
+        templateNotFound: 'The selected email template no longer exists.',
+        smtpNotReady: 'SMTP settings are not ready.',
+        upstreamAuth: 'Upstream admin authentication failed.',
+        upstreamRequest: 'Upstream request failed.',
+        notFound: 'Mass-email batch not found.',
+        invalidState: 'This batch cannot perform the requested action in its current state.',
+        persistence: 'Mass-email data could not be saved.',
+        sendFailed: 'Email sending failed.',
+        activeBatchExists: 'Another mass-email batch is already active in this workspace. Cancel or wait for it to finish before creating a new one.',
+        recipientLimitReached: 'This selection exceeds the 10,000-recipient limit. Narrow the filters and try again.',
+        itemGeneric: 'Recipient delivery failed. Check the batch later for updated details.'
+      }
+    },
     settings: {
       title: 'System Settings',
       subtitle: 'Manage system parameters, notification channels, and automation strategies.',
@@ -1367,7 +1567,8 @@ export default {
       tabs: {
         strategy: 'Strategy & Automation',
         channels: 'Channels & Alerts',
-        templates: 'Message Templates'
+        templates: 'Message Templates',
+        email: 'Email Settings'
       },
       sections: {
         basic: {
@@ -1429,6 +1630,79 @@ export default {
         missingWebhook: 'Enter the robot webhook URL first.',
         missingTelegramConfig: 'Enter the Telegram Bot Token and Chat ID first.',
         sendFailed: 'Failed to send the test message. Check the robot configuration and network connectivity.'
+      },
+      smtp: {
+        title: 'SMTP Email Settings',
+        description: 'Configure the SMTP server used to send system emails.',
+        host: 'SMTP Host',
+        port: 'Port',
+        tlsMode: 'TLS Mode',
+        tlsStarttls: 'STARTTLS (587)',
+        tlsImplicit: 'Implicit TLS (465)',
+        username: 'Username',
+        password: 'Password',
+        passwordConfigured: 'Password saved',
+        passwordNotConfigured: 'No password saved',
+        passwordKeepPlaceholder: 'Leave blank to keep the saved password',
+        passwordNewPlaceholder: 'Enter SMTP password',
+        fromEmail: 'From Email',
+        fromName: 'From Name',
+        testRecipient: 'Test Recipient',
+        saveSuccess: 'SMTP settings saved',
+        testEmail: 'Send Test Email',
+        testEmailSuccess: 'Test email sent',
+        dirtyBeforeTest: 'Save the current SMTP settings before sending a test email',
+        errors: {
+          validation: 'Check the SMTP settings.',
+          missingConfig: 'Save the SMTP settings first.',
+          invalidTlsMode: 'The TLS mode is invalid.',
+          invalidEmail: 'The email address is invalid.',
+          invalidPort: 'Port must be an integer between 1 and 65535.',
+          encryptionKeyUnavailable: 'The server has no SMTP encryption key configured.',
+          decryptFailed: 'Unable to read the saved SMTP password.',
+          sendFailed: 'Failed to send the test email.',
+          persistence: 'Failed to save the SMTP settings.'
+        }
+      },
+      emailTemplates: {
+        title: 'Email Templates',
+        description: 'Create reusable HTML emails and send a test from every saved template.',
+        library: 'Template library',
+        editor: 'Template editor',
+        add: 'New Template',
+        builtIn: 'Built-in',
+        loading: 'Loading email templates...',
+        empty: 'No templates available',
+        name: 'Template Name',
+        subject: 'Email Subject',
+        htmlBody: 'HTML Body',
+        preview: 'Email Preview',
+        code: 'View source',
+        previewTitle: 'Sandboxed email template preview',
+        save: 'Save Template',
+        delete: 'Delete',
+        test: 'Send Test Email',
+        testRecipient: 'Test Recipient',
+        testRecipientPlaceholder: "name{'@'}example.com",
+        unsaved: 'You have unsaved changes',
+        dirtyBeforeTest: 'Save the template before sending a test email.',
+        discardConfirm: 'This template has unsaved changes. Discard them?',
+        deleteConfirm: 'Delete “{name}”? This action cannot be undone.',
+        newTemplateName: 'Custom Template',
+        newTemplateSubject: 'Enter an email subject',
+        newTemplateHtml: '<div style="font-family:Arial,sans-serif;padding:32px"><h1>Write your headline here</h1><p>Compose your email content here.</p></div>',
+        createSuccess: 'Template created',
+        saveSuccess: 'Template saved',
+        deleteSuccess: 'Template deleted',
+        testEmailSuccess: 'Test email sent',
+        errors: {
+          validation: 'Enter a name, a single-line subject, and HTML content no larger than 100KB.',
+          invalidEmail: 'The test recipient email is invalid.',
+          notFound: 'The email template does not exist or was deleted.',
+          builtInProtected: 'Built-in templates cannot be deleted, but they remain editable.',
+          limitReached: 'You can create up to 50 custom templates.',
+          persistence: 'Failed to save the email template. Try again later.'
+        }
       }
     },
     system: {

@@ -110,7 +110,7 @@ git clone https://github.com/deviseo/transit-hub.git transit-hub
 cd transit-hub
 
 # Edit deploy/docker-compose.prod.yml first:
-# - image tag (defaults to deviseo/transithub:v0.1.4)
+# - image tag (defaults to deviseo/transithub:v0.1.6)
 # - replace every change-this-* placeholder
 # - database password in both DATABASE_URL and POSTGRES_PASSWORD
 # - ADMIN_EMAIL / ADMIN_PASSWORD
@@ -140,6 +140,14 @@ data/ticket-uploads
 
 `data/ticket-uploads` holds uploaded ticket images (mounted into the `app` container at `TICKET_UPLOAD_DIR`, default `/app/data/ticket-uploads`). It is not served as a public static directory; make sure this volume is present before recreating the `app` container, otherwise uploaded images will be lost even though their metadata remains in the database.
 
+`SMTP_ENCRYPTION_KEY` is an optional environment variable, only required if you want to save an SMTP password or send test emails from **System Settings > Email Settings**. Its absence does not prevent the application from starting and does not affect any non-SMTP feature. Generate a value with:
+
+```bash
+openssl rand -base64 32
+```
+
+This must be a base64-encoded 32-byte value, and it must be kept stable long-term once set. Rotating the key makes any previously saved SMTP password ciphertext undecryptable, requiring the password to be re-entered and saved.
+
 ### Development Services
 
 For local development dependencies only:
@@ -155,7 +163,7 @@ This starts PostgreSQL and Redis on local ports `5432` and `6379`.
 Because the Dockerfile is stored in `deploy/` but expects the repository root as build context, build with:
 
 ```bash
-docker build -f deploy/Dockerfile -t deviseo/transithub:v0.1.4 .
+docker build -f deploy/Dockerfile -t deviseo/transithub:v0.1.6 .
 ```
 
 ## Local Development
@@ -234,21 +242,23 @@ transit-hub/
 │   └── src/modules/          # Feature modules
 ├── deploy/                   # Dockerfile and compose files
 ├── development-docs/         # Development notes and implementation plans
-└── data/                     # Local production data directory, ignored by Git
+└── data/                     # Persistent runtime data
 ```
 
-## Project Notes
+## Core Workflows
 
-- The displayed backend version is built into the release code and is not configurable by deployment users.
-- `AGENTS.md`, `CLAUDE.md`, `.sisyphus/`, local `.env` files, build output, and runtime data are intentionally ignored by Git.
+- Workspace-isolated operations keep each admin workspace scoped while connecting multiple sub2api/new-api upstreams for synchronization and account management.
+- Group multiplier workflows track current upstream rates, support search and filtering, map own groups to upstream groups, and organize campaign-based adjustments.
+- Mapped-group automatic pricing can run manually or after sync with configurable strategies, execution status, and notifications.
+- Operational panels cover dashboard metrics, connection health, tickets, and email/template administration for day-to-day support.
 
 ## Star History
 
-<a href="https://star-history.com/#deviseo/transit-hub&Date">
+<a href="https://github.com/deviseo/transit-hub/stargazers">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=deviseo/transit-hub&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=deviseo/transit-hub&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=deviseo/transit-hub&type=Date" />
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/star-history-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/star-history-light.svg" />
+    <img alt="TransitHub star history chart" src="docs/assets/star-history-light.svg" />
   </picture>
 </a>
 
