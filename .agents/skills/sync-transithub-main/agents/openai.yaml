@@ -1,0 +1,4 @@
+interface:
+  display_name: "同步 TransitHub 官方主线"
+  short_description: "同步 TransitHub 官方主线，保留本地行为并验证前后端、数据库与部署改动"
+  default_prompt: "使用 $sync-transithub-main 将 deviseo/transit-hub 的 main 同步到本地 main，保留本地同功能行为并完成项目验证与中文摘要。"
