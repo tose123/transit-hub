@@ -110,7 +110,7 @@ git clone https://github.com/deviseo/transit-hub.git transit-hub
 cd transit-hub
 
 # 先编辑 deploy/docker-compose.prod.yml：
-# - 镜像 tag（默认使用 deviseo/transithub:v0.1.5）
+# - 镜像 tag（默认使用 deviseo/transithub:v0.1.6）
 # - 替换所有 change-this-* 占位值
 # - DATABASE_URL 和 POSTGRES_PASSWORD 中的数据库密码
 # - ADMIN_EMAIL / ADMIN_PASSWORD
@@ -163,7 +163,7 @@ docker compose -f deploy/docker-compose.yml up -d
 由于 Dockerfile 放在 `deploy/`，但构建上下文需要使用仓库根目录，请使用：
 
 ```bash
-docker build -f deploy/Dockerfile -t deviseo/transithub:v0.1.5 .
+docker build -f deploy/Dockerfile -t deviseo/transithub:v0.1.6 .
 ```
 
 ## 本地开发
@@ -242,21 +242,23 @@ transit-hub/
 │   └── src/modules/          # 前端业务模块
 ├── deploy/                   # Dockerfile 和 Compose 文件
 ├── development-docs/         # 开发说明和实现规划
-└── data/                     # 本地生产数据目录，Git 忽略
+└── data/                     # 持久化运行数据
 ```
 
-## 项目说明
+## 核心工作流
 
-- 后台展示版本号由发布代码内置，部署用户不可通过环境变量自定义。
-- `AGENTS.md`、`CLAUDE.md`、`.sisyphus/`、本地 `.env`、构建产物和运行时数据均会被 Git 忽略。
+- 工作区隔离的多上游运营：每个 admin workspace 独立管理，可连接多个 sub2api/new-api 上游并执行同步与账号管理。
+- 分组倍率工作流：跟踪最新上游倍率，支持搜索和筛选、分组关联，以及按活动组织调价。
+- 已对接分组自动调价：支持手动或同步后执行，可配置策略、查看执行状态并发送通知。
+- 日常运维面板：覆盖仪表盘指标、连接健康、工单和邮件/模板管理。
 
 ## Star History 星际历史
 
-<a href="https://star-history.com/#deviseo/transit-hub&Date">
+<a href="https://github.com/deviseo/transit-hub/stargazers">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=deviseo/transit-hub&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=deviseo/transit-hub&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=deviseo/transit-hub&type=Date" />
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/star-history-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/star-history-light.svg" />
+    <img alt="TransitHub Star 趋势图" src="docs/assets/star-history-light.svg" />
   </picture>
 </a>
 
