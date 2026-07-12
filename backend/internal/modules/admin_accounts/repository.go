@@ -2,14 +2,85 @@ package admin_accounts
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+type workspaceDeleteStatement struct {
+	Name string
+	SQL  string
+}
+
+type workspaceTableDescriptor struct {
+	Name            string
+	WorkspaceColumn string
+}
+
+const (
+	lockUserForWorkspaceDeleteSQL    = `SELECT current_admin_account_id FROM users WHERE id = $1 FOR UPDATE`
+	lockAccountForWorkspaceDeleteSQL = `SELECT id FROM admin_accounts WHERE user_id = $1 AND id = $2 FOR UPDATE`
+	nextCurrentWorkspaceIDSQL        = `SELECT id FROM admin_accounts WHERE user_id = $1 AND id <> $2 ORDER BY updated_at DESC, id ASC LIMIT 1`
+)
+
+var workspaceDeleteStatements = []workspaceDeleteStatement{
+	{Name: "mass_email_batch_items", SQL: `DELETE FROM mass_email_batch_items WHERE user_id = $1 AND admin_account_id = $2`},
+	{Name: "mass_email_batches", SQL: `DELETE FROM mass_email_batches WHERE user_id = $1 AND admin_account_id = $2`},
+	{Name: "group_rate_campaign_items", SQL: `DELETE FROM group_rate_campaign_items WHERE user_id = $1 AND admin_account_id = $2`},
+	{Name: "group_rate_campaigns", SQL: `DELETE FROM group_rate_campaigns WHERE user_id = $1 AND admin_account_id = $2`},
+	{Name: "connection_health_policy_assignments", SQL: `DELETE FROM connection_health_policy_assignments WHERE user_id = $1 AND admin_account_id = $2`},
+	{Name: "connection_health_model_targets", SQL: `DELETE FROM connection_health_model_targets WHERE user_id = $1 AND admin_account_id = $2`},
+	{Name: "connection_health_states", SQL: `DELETE FROM connection_health_states WHERE user_id = $1 AND admin_account_id = $2`},
+	{Name: "connection_health_events", SQL: `DELETE FROM connection_health_events WHERE user_id = $1 AND admin_account_id = $2`},
+	{Name: "connection_health_policies", SQL: `DELETE FROM connection_health_policies WHERE user_id = $1 AND admin_account_id = $2`},
+	{Name: "ticket_attachments", SQL: `DELETE FROM ticket_attachments WHERE user_id = $1 AND admin_account_id = $2`},
+	{Name: "ticket_messages", SQL: `DELETE FROM ticket_messages WHERE user_id = $1 AND admin_account_id = $2`},
+	{Name: "tickets", SQL: `DELETE FROM tickets WHERE user_id = $1 AND admin_account_id = $2`},
+	{Name: "ticket_embed_configs", SQL: `DELETE FROM ticket_embed_configs WHERE user_id = $1 AND admin_account_id = $2`},
+	{Name: "group_rate_snapshots", SQL: `DELETE FROM group_rate_snapshots WHERE user_id = $1 AND admin_account_id = $2`},
+	{Name: "strategy_settings", SQL: `DELETE FROM strategy_settings WHERE user_id = $1 AND admin_account_id = $2`},
+	{Name: "notification_channel_settings", SQL: `DELETE FROM notification_channel_settings WHERE user_id = $1 AND admin_account_id = $2`},
+	{Name: "smtp_settings", SQL: `DELETE FROM smtp_settings WHERE user_id = $1 AND admin_account_id = $2`},
+	{Name: "email_templates", SQL: `DELETE FROM email_templates WHERE user_id = $1 AND admin_account_id = $2`},
+	{Name: "my_site_states", SQL: `DELETE FROM my_site_states WHERE user_id = $1 AND admin_account_id = $2`},
+	{Name: "real_connections", SQL: `DELETE FROM real_connections WHERE user_id = $1 AND workspace_admin_account_id = $2`},
+	{Name: "dashboard_daily_stats", SQL: `DELETE FROM dashboard_daily_stats WHERE user_id = $1 AND admin_account_id = $2`},
+	{Name: "dashboard_balance_filter", SQL: `DELETE FROM dashboard_balance_filter WHERE user_id = $1 AND admin_account_id = $2`},
+	{Name: "upstream_sites", SQL: `DELETE FROM upstream_sites WHERE user_id = $1 AND admin_account_id = $2`},
+}
+
+var legacyWorkspaceTables = []workspaceTableDescriptor{
+	{Name: "upstream_sites", WorkspaceColumn: "admin_account_id"},
+	{Name: "group_rate_snapshots", WorkspaceColumn: "admin_account_id"},
+	{Name: "strategy_settings", WorkspaceColumn: "admin_account_id"},
+	{Name: "notification_channel_settings", WorkspaceColumn: "admin_account_id"},
+	{Name: "smtp_settings", WorkspaceColumn: "admin_account_id"},
+	{Name: "email_templates", WorkspaceColumn: "admin_account_id"},
+	{Name: "my_site_states", WorkspaceColumn: "admin_account_id"},
+	{Name: "real_connections", WorkspaceColumn: "workspace_admin_account_id"},
+	{Name: "dashboard_daily_stats", WorkspaceColumn: "admin_account_id"},
+	{Name: "dashboard_balance_filter", WorkspaceColumn: "admin_account_id"},
+	{Name: "mass_email_batches", WorkspaceColumn: "admin_account_id"},
+	{Name: "mass_email_batch_items", WorkspaceColumn: "admin_account_id"},
+	{Name: "group_rate_campaigns", WorkspaceColumn: "admin_account_id"},
+	{Name: "group_rate_campaign_items", WorkspaceColumn: "admin_account_id"},
+	{Name: "connection_health_policies", WorkspaceColumn: "admin_account_id"},
+	{Name: "connection_health_model_targets", WorkspaceColumn: "admin_account_id"},
+	{Name: "connection_health_states", WorkspaceColumn: "admin_account_id"},
+	{Name: "connection_health_events", WorkspaceColumn: "admin_account_id"},
+	{Name: "connection_health_policy_assignments", WorkspaceColumn: "admin_account_id"},
+	{Name: "ticket_embed_configs", WorkspaceColumn: "admin_account_id"},
+	{Name: "tickets", WorkspaceColumn: "admin_account_id"},
+	{Name: "ticket_messages", WorkspaceColumn: "admin_account_id"},
+	{Name: "ticket_attachments", WorkspaceColumn: "admin_account_id"},
+}
 
 type Repository struct {
 	db *pgxpool.Pool
@@ -41,18 +112,31 @@ func (r *Repository) EnsureSchema(ctx context.Context) error {
 	return r.assignLegacyRows(ctx)
 }
 
+func (r *Repository) AssignLegacyRows(ctx context.Context) error {
+	if err := r.createLegacyAccounts(ctx); err != nil {
+		return err
+	}
+	return r.assignLegacyRows(ctx)
+}
+
 // createLegacyAccounts 为已有业务数据但尚无 admin account 的用户创建 legacy workspace。
 func (r *Repository) createLegacyAccounts(ctx context.Context) error {
-	_, err := r.db.Exec(ctx, `
+	for _, table := range legacyWorkspaceTables {
+		if err := r.createLegacyAccountsForTable(ctx, table); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Repository) createLegacyAccountsForTable(ctx context.Context, table workspaceTableDescriptor) error {
+	exists, err := r.tableExists(ctx, table.Name)
+	if err != nil || !exists {
+		return err
+	}
+	_, err = r.db.Exec(ctx, fmt.Sprintf(`
 		WITH scoped_users AS (
-			SELECT DISTINCT user_id FROM upstream_sites WHERE user_id <> ''
-			UNION SELECT DISTINCT user_id FROM group_rate_snapshots WHERE user_id <> ''
-			UNION SELECT DISTINCT user_id FROM strategy_settings WHERE user_id <> ''
-			UNION SELECT DISTINCT user_id FROM notification_channel_settings WHERE user_id <> ''
-			UNION SELECT DISTINCT user_id FROM my_site_states WHERE user_id <> ''
-			UNION SELECT DISTINCT user_id FROM real_connections WHERE user_id <> ''
-			UNION SELECT DISTINCT user_id FROM dashboard_daily_stats WHERE user_id <> ''
-			UNION SELECT DISTINCT user_id FROM dashboard_balance_filter WHERE user_id <> ''
+			SELECT DISTINCT user_id FROM %s WHERE user_id <> ''
 		), legacy AS (
 			SELECT users.id AS user_id, 'adminacct_' || encode(sha256(convert_to(users.id || '|legacy||legacy', 'UTF8')), 'hex') AS account_id
 			FROM users JOIN scoped_users ON scoped_users.user_id = users.id
@@ -60,7 +144,7 @@ func (r *Repository) createLegacyAccounts(ctx context.Context) error {
 		INSERT INTO admin_accounts (id, user_id, platform, base_url, identity, display_name, auth_method, last_used_at, created_at, updated_at)
 		SELECT account_id, user_id, 'legacy', '', 'legacy', 'Legacy workspace', 'legacy', now(), now(), now() FROM legacy
 		ON CONFLICT (user_id, platform, base_url, identity) DO UPDATE SET updated_at = EXCLUDED.updated_at
-	`)
+	`, table.Name))
 	return err
 }
 
@@ -71,26 +155,30 @@ func (r *Repository) createLegacyAccounts(ctx context.Context) error {
 // 而非 users.current_admin_account_id。这保证即使用户已有多个 workspace 并
 // 切换到了非 legacy 的工作区，历史数据也不会散落到其他 workspace。
 func (r *Repository) assignLegacyRows(ctx context.Context) error {
-	statements := []string{
-		// 为尚无当前 workspace 的用户设置 legacy account 为默认。
-		`UPDATE users SET current_admin_account_id = legacy.id FROM admin_accounts AS legacy WHERE users.id = legacy.user_id AND users.current_admin_account_id = '' AND legacy.platform = 'legacy'`,
-		// 各业务表旧行归属到用户的 legacy workspace（第一个工作区）。
-		`UPDATE upstream_sites SET admin_account_id = legacy.id FROM admin_accounts AS legacy WHERE upstream_sites.user_id = legacy.user_id AND upstream_sites.admin_account_id = '' AND legacy.platform = 'legacy'`,
-		`UPDATE group_rate_snapshots SET admin_account_id = legacy.id FROM admin_accounts AS legacy WHERE group_rate_snapshots.user_id = legacy.user_id AND group_rate_snapshots.admin_account_id = '' AND legacy.platform = 'legacy'`,
-		`UPDATE strategy_settings SET admin_account_id = legacy.id FROM admin_accounts AS legacy WHERE strategy_settings.user_id = legacy.user_id AND strategy_settings.admin_account_id = '' AND legacy.platform = 'legacy'`,
-		`UPDATE notification_channel_settings SET admin_account_id = legacy.id FROM admin_accounts AS legacy WHERE notification_channel_settings.user_id = legacy.user_id AND notification_channel_settings.admin_account_id = '' AND legacy.platform = 'legacy'`,
-		`UPDATE my_site_states SET admin_account_id = legacy.id FROM admin_accounts AS legacy WHERE my_site_states.user_id = legacy.user_id AND my_site_states.admin_account_id = '' AND legacy.platform = 'legacy'`,
-		`UPDATE real_connections SET workspace_admin_account_id = legacy.id FROM admin_accounts AS legacy WHERE real_connections.user_id = legacy.user_id AND real_connections.workspace_admin_account_id = '' AND legacy.platform = 'legacy'`,
-		// dashboard 指标表旧行归属到用户的 legacy workspace。
-		`UPDATE dashboard_daily_stats SET admin_account_id = legacy.id FROM admin_accounts AS legacy WHERE dashboard_daily_stats.user_id = legacy.user_id AND dashboard_daily_stats.admin_account_id = '' AND legacy.platform = 'legacy'`,
-		`UPDATE dashboard_balance_filter SET admin_account_id = legacy.id FROM admin_accounts AS legacy WHERE dashboard_balance_filter.user_id = legacy.user_id AND dashboard_balance_filter.admin_account_id = '' AND legacy.platform = 'legacy'`,
+	if _, err := r.db.Exec(ctx, `UPDATE users SET current_admin_account_id = legacy.id FROM admin_accounts AS legacy WHERE users.id = legacy.user_id AND users.current_admin_account_id = '' AND legacy.platform = 'legacy'`); err != nil {
+		return err
 	}
-	for _, statement := range statements {
-		if _, err := r.db.Exec(ctx, statement); err != nil {
+	for _, table := range legacyWorkspaceTables {
+		if err := r.assignLegacyRowsForTable(ctx, table); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (r *Repository) assignLegacyRowsForTable(ctx context.Context, table workspaceTableDescriptor) error {
+	exists, err := r.tableExists(ctx, table.Name)
+	if err != nil || !exists {
+		return err
+	}
+	_, err = r.db.Exec(ctx, fmt.Sprintf(`UPDATE %s SET %s = legacy.id FROM admin_accounts AS legacy WHERE %s.user_id = legacy.user_id AND %s.%s = '' AND legacy.platform = 'legacy'`, table.Name, table.WorkspaceColumn, table.Name, table.Name, table.WorkspaceColumn))
+	return err
+}
+
+func (r *Repository) tableExists(ctx context.Context, name string) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, name).Scan(&exists)
+	return exists, err
 }
 
 func (r *Repository) List(ctx context.Context, userID string) ([]Account, error) {
@@ -189,6 +277,229 @@ func (r *Repository) Update(ctx context.Context, userID string, accountID string
 		}
 	}
 	return nil, nil
+}
+
+func (r *Repository) DeleteWorkspace(ctx context.Context, userID string, accountID string) (*DeleteResult, error) {
+	accountID = strings.TrimSpace(accountID)
+	if accountID == "" {
+		return nil, nil
+	}
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	currentID, err := r.lockUserForWorkspaceDelete(ctx, tx, userID)
+	if err != nil {
+		return nil, err
+	}
+	accountFound, err := r.lockAccountForWorkspaceDelete(ctx, tx, userID, accountID)
+	if err != nil {
+		return nil, err
+	}
+	if !accountFound {
+		return nil, nil
+	}
+
+	attachmentPaths, err := collectStrings(ctx, tx, `SELECT storage_path FROM ticket_attachments WHERE user_id = $1 AND admin_account_id = $2 ORDER BY storage_path ASC`, userID, accountID)
+	if err != nil {
+		return nil, err
+	}
+	upstreamSiteIDs, err := collectStrings(ctx, tx, `SELECT id FROM upstream_sites WHERE user_id = $1 AND admin_account_id = $2 ORDER BY id ASC`, userID, accountID)
+	if err != nil {
+		return nil, err
+	}
+	cleanupJobID, err := randomCleanupJobID()
+	if err != nil {
+		return nil, err
+	}
+	if err := insertCleanupJob(ctx, tx, cleanupJobID, userID, accountID, attachmentPaths, upstreamSiteIDs); err != nil {
+		return nil, err
+	}
+
+	nextCurrentID := currentID
+	wasCurrent := currentID == accountID
+	if wasCurrent {
+		nextCurrentID, err = r.nextCurrentWorkspaceID(ctx, tx, userID, accountID)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE users SET current_admin_account_id = $2 WHERE id = $1`, userID, nextCurrentID); err != nil {
+			return nil, err
+		}
+	}
+
+	for _, stmt := range workspaceDeleteStatements {
+		if _, err := tx.Exec(ctx, stmt.SQL, userID, accountID); err != nil {
+			return nil, err
+		}
+	}
+	result, err := tx.Exec(ctx, `DELETE FROM admin_accounts WHERE user_id = $1 AND id = $2`, userID, accountID)
+	if err != nil {
+		return nil, err
+	}
+	if result.RowsAffected() == 0 {
+		return nil, nil
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return &DeleteResult{
+		CleanupJobID:           cleanupJobID,
+		DeletedID:              accountID,
+		WasCurrent:             wasCurrent,
+		CurrentAdminAccountID:  nextCurrentID,
+		AttachmentStoragePaths: attachmentPaths,
+		UpstreamSiteIDs:        upstreamSiteIDs,
+	}, nil
+}
+
+func insertCleanupJob(ctx context.Context, tx pgx.Tx, id string, userID string, adminAccountID string, attachmentPaths []string, upstreamSiteIDs []string) error {
+	attachmentJSON, err := json.Marshal(attachmentPaths)
+	if err != nil {
+		return err
+	}
+	upstreamJSON, err := json.Marshal(upstreamSiteIDs)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO workspace_cleanup_jobs (id, user_id, admin_account_id, attachment_paths, upstream_site_ids, attempts, next_attempt_at, last_error, created_at, updated_at)
+		VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, 0, now(), '', now(), now())
+	`, id, userID, adminAccountID, string(attachmentJSON), string(upstreamJSON))
+	return err
+}
+
+func (r *Repository) ClaimDueCleanupJobs(ctx context.Context, limit int) ([]CleanupJob, error) {
+	if limit < 1 {
+		limit = 1
+	}
+	rows, err := r.db.Query(ctx, `
+		UPDATE workspace_cleanup_jobs
+		SET attempts = attempts + 1, updated_at = now()
+		WHERE id IN (
+			SELECT id FROM workspace_cleanup_jobs
+			WHERE next_attempt_at <= now()
+			ORDER BY next_attempt_at ASC, created_at ASC
+			LIMIT $1
+			FOR UPDATE SKIP LOCKED
+		)
+		RETURNING id, user_id, admin_account_id, attachment_paths, upstream_site_ids, attempts, next_attempt_at, last_error, created_at, updated_at
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	jobs := make([]CleanupJob, 0)
+	for rows.Next() {
+		job, err := scanCleanupJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, rows.Err()
+}
+
+func (r *Repository) CompleteCleanupJob(ctx context.Context, id string) error {
+	_, err := r.db.Exec(ctx, `DELETE FROM workspace_cleanup_jobs WHERE id = $1`, id)
+	return err
+}
+
+func (r *Repository) MarkCleanupJobRetry(ctx context.Context, id string, attempt int, err error) error {
+	lastError := boundedCleanupError(err)
+	delay := cleanupRetryDelay(attempt)
+	_, execErr := r.db.Exec(ctx, `UPDATE workspace_cleanup_jobs SET last_error = $2, next_attempt_at = now() + ($3 * interval '1 second'), updated_at = now() WHERE id = $1`, id, lastError, int(delay.Seconds()))
+	return execErr
+}
+
+func scanCleanupJob(row pgx.Row) (CleanupJob, error) {
+	var job CleanupJob
+	var attachmentJSON, upstreamJSON []byte
+	err := row.Scan(&job.ID, &job.UserID, &job.AdminAccountID, &attachmentJSON, &upstreamJSON, &job.Attempts, &job.NextAttemptAt, &job.LastError, &job.CreatedAt, &job.UpdatedAt)
+	if err != nil {
+		return CleanupJob{}, err
+	}
+	_ = json.Unmarshal(attachmentJSON, &job.AttachmentStoragePaths)
+	_ = json.Unmarshal(upstreamJSON, &job.UpstreamSiteIDs)
+	return job, nil
+}
+
+func boundedCleanupError(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := err.Error()
+	if len(message) > 500 {
+		message = message[:500]
+	}
+	return message
+}
+
+func cleanupRetryDelay(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	delay := time.Duration(attempt) * time.Minute
+	if delay > 30*time.Minute {
+		return 30 * time.Minute
+	}
+	return delay
+}
+
+func randomCleanupJobID() (string, error) {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return "wscleanup_" + hex.EncodeToString(buf), nil
+}
+
+func (r *Repository) lockUserForWorkspaceDelete(ctx context.Context, tx pgx.Tx, userID string) (string, error) {
+	var currentID string
+	err := tx.QueryRow(ctx, lockUserForWorkspaceDeleteSQL, userID).Scan(&currentID)
+	if err == pgx.ErrNoRows {
+		return "", nil
+	}
+	return currentID, err
+}
+
+func (r *Repository) lockAccountForWorkspaceDelete(ctx context.Context, tx pgx.Tx, userID string, accountID string) (bool, error) {
+	var id string
+	err := tx.QueryRow(ctx, lockAccountForWorkspaceDeleteSQL, userID, accountID).Scan(&id)
+	if err == pgx.ErrNoRows {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (r *Repository) nextCurrentWorkspaceID(ctx context.Context, tx pgx.Tx, userID string, deletedAccountID string) (string, error) {
+	var id string
+	err := tx.QueryRow(ctx, nextCurrentWorkspaceIDSQL, userID, deletedAccountID).Scan(&id)
+	if err == pgx.ErrNoRows {
+		return "", nil
+	}
+	return id, err
+}
+
+func collectStrings(ctx context.Context, tx pgx.Tx, sql string, args ...any) ([]string, error) {
+	rows, err := tx.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]string, 0)
+	for rows.Next() {
+		var value string
+		if err := rows.Scan(&value); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(value) != "" {
+			values = append(values, value)
+		}
+	}
+	return values, rows.Err()
 }
 
 func StableID(userID, platform, baseURL, identity string) string {
