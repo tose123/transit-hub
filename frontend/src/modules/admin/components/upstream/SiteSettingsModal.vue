@@ -106,7 +106,6 @@ const save = async () => {
               <Input
                 type="number"
                 v-model="balanceThreshold"
-                min="0"
                 step="0.01"
                 :placeholder="t('admin.upstream.siteSettings.balanceThresholdPlaceholder')"
                 class="max-w-[200px]"

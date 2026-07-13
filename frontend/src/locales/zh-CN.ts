@@ -907,7 +907,7 @@ export default {
       siteSettings: {
         title: '站点预警设置',
         balanceThreshold: '自定义余额预警阈值',
-        balanceThresholdHelp: '开启后使用站点专属阈值，关闭则使用全局默认值。',
+        balanceThresholdHelp: '开启后使用站点专属阈值。负数表示允许余额欠费至该金额后再预警；关闭则使用全局默认值。',
         balanceThresholdPlaceholder: '输入阈值金额',
         save: '保存',
         saveSuccess: '已保存',

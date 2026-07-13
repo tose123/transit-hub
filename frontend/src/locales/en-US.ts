@@ -907,7 +907,7 @@ export default {
       siteSettings: {
         title: 'Site Alert Settings',
         balanceThreshold: 'Custom Balance Threshold',
-        balanceThresholdHelp: 'Enable to use a site-specific threshold. Disable to use the global default.',
+        balanceThresholdHelp: 'Enable to use a site-specific threshold. A negative value allows that balance deficit before alerting; disable to use the global default.',
         balanceThresholdPlaceholder: 'Enter threshold amount',
         save: 'Save',
         saveSuccess: 'Saved',
