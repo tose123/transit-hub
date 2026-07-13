@@ -44,8 +44,9 @@ const save = async () => {
   isSaving.value = true
   errorMsg.value = null
   try {
+    const threshold = Number.parseFloat(balanceThreshold.value)
     const settings = {
-      balanceThreshold: useCustomThreshold.value ? (Number.parseFloat(balanceThreshold.value) || null) : null,
+      balanceThreshold: useCustomThreshold.value && Number.isFinite(threshold) ? threshold : null,
     }
     await updateSiteSettings(props.site.id, settings)
     emit('saved', props.site.id, settings)
