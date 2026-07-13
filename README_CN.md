@@ -110,7 +110,7 @@ git clone https://github.com/tose123/transit-hub.git transit-hub
 cd transit-hub
 
 # 先编辑 deploy/docker-compose.prod.yml：
-# - 镜像 tag（默认使用 ghcr.io/tose123/transit-hub:v26.7.131234）
+# - 镜像 tag（默认使用 ghcr.io/tose123/transit-hub:v26.7.131446）
 # - 替换所有 change-this-* 占位值
 # - DATABASE_URL 和 POSTGRES_PASSWORD 中的数据库密码
 # - ADMIN_EMAIL / ADMIN_PASSWORD
@@ -163,7 +163,7 @@ docker compose -f deploy/docker-compose.yml up -d
 由于 Dockerfile 放在 `deploy/`，但构建上下文需要使用仓库根目录，请使用：
 
 ```bash
-docker build -f deploy/Dockerfile -t ghcr.io/tose123/transit-hub:v26.7.131234 .
+docker build -f deploy/Dockerfile -t ghcr.io/tose123/transit-hub:v26.7.131446 .
 ```
 
 ## 本地开发
