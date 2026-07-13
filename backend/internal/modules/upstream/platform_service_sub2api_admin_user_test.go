@@ -130,6 +130,70 @@ func TestFetchSub2APIAdminUsersPage_RequestQueryAuthAndParsing(t *testing.T) {
 	}
 }
 
+func TestFetchSub2APIAdminUserBreakdown_RequestQueryAuthAndParsing(t *testing.T) {
+	var gotPath, gotAuth string
+	var gotQuery url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		gotQuery = r.URL.Query()
+		writeJSON(w, map[string]any{
+			"data": map[string]any{
+				"start_date": "2026-07-12",
+				"end_date":   "2026-07-13",
+				"users": []map[string]any{
+					{"user_id": "u-1", "email": "u1@example.com", "requests": 12, "total_tokens": 456, "actual_cost": 1.25},
+					{"user_id": "u-2", "email": "u2@example.com", "requests": 3, "input_tokens": 10, "output_tokens": 20, "cache_tokens": 5, "total_tokens": 35, "cost": 0.7, "actual_cost": 0.5},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	service := NewPlatformService(NewHTTPClient(server.Client()))
+	session := Session{Platform: PlatformSub2API, BaseURL: server.URL, AccessToken: "admin-token", TokenType: "Bearer"}
+	breakdown, err := service.FetchSub2APIAdminUserBreakdown(session, Sub2APIUserBreakdownQuery{StartDate: "2026-07-12", EndDate: "2026-07-13", SortBy: "email", Limit: 500, Timezone: "Asia/Shanghai"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotPath != "/api/v1/admin/dashboard/user-breakdown" {
+		t.Fatalf("expected breakdown path, got %q", gotPath)
+	}
+	if gotAuth != "Bearer admin-token" {
+		t.Fatalf("expected Bearer auth, got %q", gotAuth)
+	}
+	assertQueryValue(t, gotQuery, "start_date", "2026-07-12")
+	assertQueryValue(t, gotQuery, "end_date", "2026-07-13")
+	assertQueryValue(t, gotQuery, "sort_by", "total_tokens")
+	assertQueryValue(t, gotQuery, "limit", "200")
+	assertQueryValue(t, gotQuery, "timezone", "Asia/Shanghai")
+	if breakdown.StartDate != "2026-07-12" || breakdown.EndDate != "2026-07-13" || len(breakdown.Users) != 2 {
+		t.Fatalf("unexpected parsed breakdown: %+v", breakdown)
+	}
+	first := breakdown.Users[0]
+	if first.UserID != "u-1" || first.Email != "u1@example.com" || first.Requests != 12 || first.TotalTokens != 456 || first.ActualCost != 1.25 {
+		t.Fatalf("unexpected first row: %+v", first)
+	}
+	if first.InputTokens != 0 || first.OutputTokens != 0 || first.CacheTokens != 0 || first.Cost != 0 {
+		t.Fatalf("missing token breakdown fields should stay zero, got %+v", first)
+	}
+}
+
+func TestFetchSub2APIAdminUserBreakdown_Unsupported404Status(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		writeJSON(w, map[string]any{"code": 404, "message": "not found", "data": map[string]any{}})
+	}))
+	defer server.Close()
+
+	service := NewPlatformService(NewHTTPClient(server.Client()))
+	_, err := service.FetchSub2APIAdminUserBreakdown(Session{Platform: PlatformSub2API, BaseURL: server.URL, AccessToken: "admin-token"}, Sub2APIUserBreakdownQuery{StartDate: "2026-07-12", EndDate: "2026-07-13"})
+	requestErr, ok := err.(*RequestError)
+	if !ok || requestErr.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected RequestError with 404 status, got %#v", err)
+	}
+}
+
 func TestFetchSub2APIAdminUsersPage_UsesNormalizedPaginationFallback(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{

@@ -29,6 +29,11 @@ const routes = [
     component: () => import('./modules/embed/tickets/TicketEmbedPage.vue')
   },
   {
+    path: '/embed/leaderboard',
+    name: 'EmbedLeaderboard',
+    component: () => import('./modules/embed/leaderboard/LeaderboardEmbedPage.vue')
+  },
+  {
     path: '/admin',
     component: () => import('./modules/admin/layout/AdminLayout.vue'),
     meta: { requiresAuth: true },
@@ -80,6 +85,12 @@ const routes = [
         name: 'AdminTickets',
         meta: { requiresWorkspace: true },
         component: () => import('./modules/admin/views/TicketsView.vue')
+      },
+      {
+        path: 'leaderboard',
+        name: 'AdminLeaderboard',
+        meta: { requiresWorkspace: true },
+        component: () => import('./modules/leaderboard/LeaderboardAdminPage.vue')
       },
       {
         path: 'mass-email',
