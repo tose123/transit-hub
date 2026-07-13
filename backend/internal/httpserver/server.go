@@ -239,7 +239,7 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 			return
 		}
 		checkBalanceWarning(ctx, settingsService, upstreamService, strategy, userID, siteID, siteName, oldMetrics, newMetrics)
-		checkMultiplierChanges(ctx, settingsService, strategy, userID, siteID, siteName, oldMetrics, newMetrics)
+		checkMultiplierChanges(ctx, settingsService, mySitesService, strategy, userID, siteID, siteName, oldMetrics, newMetrics)
 		// 自动调价：分组级 enableAutoPricing 是唯一开关，Service 内部逐 mapping 判断。
 		mySitesService.ApplyAutoPricingAfterSync(ctx, userID, adminAccountID, siteID, siteName, oldMetrics, newMetrics)
 	}
@@ -532,10 +532,24 @@ func checkBalanceWarning(ctx context.Context, svc *settings.Service, uSvc *upstr
 	svc.SendToBots(ctx, userID, strategy.BalanceNotifyBotIDs, msg)
 }
 
+type multiplierAlertNotifier interface {
+	SendToBots(ctx context.Context, userID string, botIDs []string, message string)
+}
+
+type upstreamKeyLister interface {
+	ListUpstreamKeys(ctx context.Context, userID string, siteID string) ([]upstream.Sub2APIKeyItem, error)
+}
+
+type multiplierChange struct {
+	groupID   string
+	groupName string
+	oldRate   float64
+	newRate   float64
+}
+
 // checkMultiplierChanges 对比同步前后的分组倍率，任何变化都发送通知。
 // 只受系统设置全局开关 strategy.EnableMultiplierAlert 控制。
-func checkMultiplierChanges(ctx context.Context, svc *settings.Service, strategy settings.StrategySettings, userID, siteID, siteName string, oldMetrics, newMetrics upstream.Metrics) {
-	_ = siteID
+func checkMultiplierChanges(ctx context.Context, notifier multiplierAlertNotifier, keyLister upstreamKeyLister, strategy settings.StrategySettings, userID, siteID, siteName string, oldMetrics, newMetrics upstream.Metrics) {
 	if !strategy.EnableMultiplierAlert || len(strategy.MultiplierNotifyBotIDs) == 0 {
 		return
 	}
@@ -548,6 +562,7 @@ func checkMultiplierChanges(ctx context.Context, svc *settings.Service, strategy
 			oldMap[g.ID+"|"+g.Name] = *g.Multiplier
 		}
 	}
+	changes := make([]multiplierChange, 0)
 	for _, g := range newMetrics.Groups {
 		if g.Multiplier == nil {
 			continue
@@ -557,10 +572,65 @@ func checkMultiplierChanges(ctx context.Context, svc *settings.Service, strategy
 		if !existed || oldVal == *g.Multiplier {
 			continue
 		}
-		msg := formatMultiplierChange(siteName, g.Name, oldVal, *g.Multiplier, strategy.MultiplierTemplate)
-		log.Printf("[alert] 倍率变更触发 site=%s group=%s old=%.4f new=%.4f", siteName, g.Name, oldVal, *g.Multiplier)
-		svc.SendToBots(ctx, userID, strategy.MultiplierNotifyBotIDs, msg)
+		changes = append(changes, multiplierChange{groupID: g.ID, groupName: g.Name, oldRate: oldVal, newRate: *g.Multiplier})
 	}
+	if len(changes) == 0 {
+		return
+	}
+
+	keys, err := keyLister.ListUpstreamKeys(ctx, userID, siteID)
+	if err != nil {
+		log.Printf("[alert] 获取上游 Key 列表失败 site=%s err=%v", siteName, err)
+	}
+	for _, change := range changes {
+		bound, keyNames := multiplierKeyBinding(change.groupID, change.groupName, keys, err)
+		msg := formatMultiplierChange(siteName, change.groupName, change.oldRate, change.newRate, strategy.MultiplierTemplate)
+		msg += "\n是否绑定 Key：" + bound + "；Key 名称：" + keyNames
+		log.Printf("[alert] 倍率变更触发 site=%s group=%s old=%.4f new=%.4f", siteName, change.groupName, change.oldRate, change.newRate)
+		notifier.SendToBots(ctx, userID, strategy.MultiplierNotifyBotIDs, msg)
+	}
+}
+
+func multiplierKeyBinding(groupID, groupName string, keys []upstream.Sub2APIKeyItem, listErr error) (string, string) {
+	if listErr != nil {
+		return "未知", "获取失败"
+	}
+	names := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, key := range keys {
+		if !groupListContains(key.GroupID, groupID) && !groupListContains(key.GroupName, groupName) {
+			continue
+		}
+		name := strings.TrimSpace(key.Name)
+		if name == "" {
+			name = "未命名 Key"
+			if id := strings.TrimSpace(key.ID); id != "" {
+				name += "（ID：" + id + "）"
+			}
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return "否", "无"
+	}
+	return "是", strings.Join(names, "、")
+}
+
+func groupListContains(value, target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	for _, item := range strings.Split(value, ",") {
+		if strings.TrimSpace(item) == target {
+			return true
+		}
+	}
+	return false
 }
 
 const defaultBalanceTemplate = "【余额预警】{siteName} 站点余额（CNY）已不足 {threshold} 元，当前余额为 {balance} 元。"
