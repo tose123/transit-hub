@@ -559,7 +559,7 @@ func checkMultiplierChanges(ctx context.Context, notifier multiplierAlertNotifie
 	oldMap := make(map[string]float64, len(oldMetrics.Groups))
 	for _, g := range oldMetrics.Groups {
 		if g.Multiplier != nil {
-			oldMap[g.ID+"|"+g.Name] = *g.Multiplier
+			oldMap[multiplierGroupKey(g)] = *g.Multiplier
 		}
 	}
 	changes := make([]multiplierChange, 0)
@@ -567,8 +567,7 @@ func checkMultiplierChanges(ctx context.Context, notifier multiplierAlertNotifie
 		if g.Multiplier == nil {
 			continue
 		}
-		key := g.ID + "|" + g.Name
-		oldVal, existed := oldMap[key]
+		oldVal, existed := oldMap[multiplierGroupKey(g)]
 		if !existed || oldVal == *g.Multiplier {
 			continue
 		}
@@ -589,6 +588,13 @@ func checkMultiplierChanges(ctx context.Context, notifier multiplierAlertNotifie
 		log.Printf("[alert] 倍率变更触发 site=%s group=%s old=%.4f new=%.4f", siteName, change.groupName, change.oldRate, change.newRate)
 		notifier.SendToBots(ctx, userID, strategy.MultiplierNotifyBotIDs, msg)
 	}
+}
+
+func multiplierGroupKey(group upstream.GroupInfo) string {
+	if id := strings.TrimSpace(group.ID); id != "" {
+		return "id:" + id
+	}
+	return "name:" + group.Name
 }
 
 func multiplierKeyBinding(groupID, groupName string, keys []upstream.Sub2APIKeyItem, listErr error) (string, string) {

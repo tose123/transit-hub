@@ -46,7 +46,7 @@ func TestCheckMultiplierChangesIncludesKeyBindings(t *testing.T) {
 
 	checkMultiplierChanges(context.Background(), service, service, strategy, "user-1", "site-1", "上游站点", upstream.Metrics{
 		Groups: []upstream.GroupInfo{
-			{ID: "group-a", Name: "分组 A", Multiplier: &oldRateA},
+			{ID: "group-a", Name: "旧分组 A", Multiplier: &oldRateA},
 			{ID: "group-b", Name: "分组 B", Multiplier: &oldRateB},
 		},
 	}, upstream.Metrics{
