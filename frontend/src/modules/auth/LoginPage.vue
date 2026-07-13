@@ -47,7 +47,7 @@ const handleLogin = async () => {
     <div class="w-full max-w-md">
       <div class="bg-surface-elevated border border-border/50 rounded-[2rem] p-8 shadow-2xl backdrop-blur-xl relative overflow-hidden">
         <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-accent to-primary" />
-        
+
         <div class="text-center mb-8">
           <div class="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 border border-primary/20 mb-4">
             <span class="text-2xl font-black text-primary leading-none">T</span>
@@ -61,10 +61,10 @@ const handleLogin = async () => {
             <label class="text-sm font-medium text-foreground">{{ t('auth.login.email') }}</label>
             <div class="relative">
               <Mail class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input 
+              <Input
                 v-model="email"
-                type="email" 
-                :placeholder="t('auth.login.emailPlaceholder')" 
+                type="email"
+                :placeholder="t('auth.login.emailPlaceholder')"
                 class="pl-10 h-12 bg-surface border-border/50 focus:border-primary"
                 autocomplete="email"
                 :disabled="isLoading"
@@ -77,10 +77,10 @@ const handleLogin = async () => {
             <label class="text-sm font-medium text-foreground">{{ t('auth.login.password') }}</label>
             <div class="relative">
               <KeyRound class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input 
+              <Input
                 v-model="password"
-                type="password" 
-                :placeholder="t('auth.login.passwordPlaceholder')" 
+                type="password"
+                :placeholder="t('auth.login.passwordPlaceholder')"
                 class="pl-10 h-12 bg-surface border-border/50 focus:border-primary"
                 autocomplete="current-password"
                 :disabled="isLoading"
@@ -103,8 +103,8 @@ const handleLogin = async () => {
             {{ t(errorKey) }}
           </p>
 
-          <Button 
-            type="submit" 
+          <Button
+            type="submit"
             class="w-full h-12 text-base font-bold mt-2 shadow-glow"
             :disabled="isLoading"
           >

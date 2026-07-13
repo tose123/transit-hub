@@ -64,7 +64,7 @@ onMounted(() => {
 
 <template>
   <div class="flex flex-col w-full overflow-hidden">
-    
+
     <!-- Hero Section -->
     <section class="relative flex min-h-screen items-center justify-center pt-20">
       <!-- Background Abstract Elements -->
@@ -84,16 +84,16 @@ onMounted(() => {
             </span>
             {{ t('hero.badge') }}
           </div>
-          
+
           <h1 ref="titleRef" class="mb-6 text-5xl font-black leading-tight tracking-tighter sm:text-6xl md:text-7xl lg:text-[5.5rem] lg:leading-[1.1]">
             {{ t('hero.title') }} <br/>
             <span class="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">{{ t('hero.highlight') }}</span>
           </h1>
-          
+
           <p ref="subtitleRef" class="mb-10 max-w-2xl text-lg text-muted-foreground sm:text-xl lg:text-2xl leading-relaxed">
             {{ t('hero.subtitle') }}
           </p>
-          
+
           <div ref="actionsRef" class="flex flex-col sm:flex-row items-center gap-4 w-full justify-center lg:justify-start">
             <Button size="lg" class="w-full sm:w-auto h-14 rounded-full px-8 text-lg font-bold bg-primary text-primary-foreground shadow-[0_0_40px_rgba(var(--primary),0.4)] hover:shadow-[0_0_60px_rgba(var(--primary),0.6)] hover:bg-primary/90 transition-all duration-300">
               {{ t('hero.startBtn') }}
@@ -109,7 +109,7 @@ onMounted(() => {
           <div class="relative w-full aspect-square rounded-[3rem] border border-border/50 bg-surface/40 p-8 backdrop-blur-2xl shadow-2xl rotate-y-[-10deg] rotate-x-[5deg] transform-style-3d">
             <!-- Glass Panes inside visual -->
             <div class="absolute inset-0 rounded-[3rem] bg-gradient-to-tr from-primary/10 via-transparent to-accent/10 opacity-50"></div>
-            
+
             <div class="flex h-full flex-col gap-4 relative z-10">
               <!-- Mock UI Header -->
               <div class="flex items-center justify-between border-b border-border/40 pb-4">
@@ -120,7 +120,7 @@ onMounted(() => {
                 </div>
                 <div class="rounded-full bg-surface-elevated px-3 py-1 text-xs font-mono text-muted-foreground">global-router-1</div>
               </div>
-              
+
               <!-- Mock UI Body -->
               <div class="flex-1 space-y-4 pt-4">
                 <div class="flex items-center justify-between rounded-2xl bg-surface-elevated/50 p-4 border border-border/30">

@@ -68,8 +68,8 @@ const handleRegister = async () => {
     </div>
 
     <!-- Back Button -->
-    <button 
-      @click="router.push('/')" 
+    <button
+      @click="router.push('/')"
       class="absolute top-8 left-8 flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
     >
       <ArrowLeft class="w-4 h-4" />
@@ -79,7 +79,7 @@ const handleRegister = async () => {
     <div class="w-full max-w-md">
       <div class="bg-surface-elevated border border-border/50 rounded-[2rem] p-8 shadow-2xl backdrop-blur-xl relative overflow-hidden">
         <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-accent to-primary" />
-        
+
         <div class="text-center mb-8">
           <div class="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 border border-primary/20 mb-4">
             <span class="text-2xl font-black text-primary leading-none">T</span>
@@ -93,10 +93,10 @@ const handleRegister = async () => {
             <label class="text-sm font-medium text-foreground">{{ t('auth.register.email') }}</label>
             <div class="relative">
               <Mail class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input 
+              <Input
                 v-model="email"
-                type="email" 
-                :placeholder="t('auth.register.emailPlaceholder')" 
+                type="email"
+                :placeholder="t('auth.register.emailPlaceholder')"
                 class="pl-10 h-12 bg-surface border-border/50 focus:border-primary"
                 autocomplete="email"
                 :disabled="isLoading"
@@ -109,10 +109,10 @@ const handleRegister = async () => {
             <label class="text-sm font-medium text-foreground">{{ t('auth.register.password') }}</label>
             <div class="relative">
               <KeyRound class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input 
+              <Input
                 v-model="password"
-                type="password" 
-                :placeholder="t('auth.register.passwordPlaceholder')" 
+                type="password"
+                :placeholder="t('auth.register.passwordPlaceholder')"
                 class="pl-10 h-12 bg-surface border-border/50 focus:border-primary"
                 autocomplete="new-password"
                 :disabled="isLoading"
@@ -125,17 +125,17 @@ const handleRegister = async () => {
             <label class="text-sm font-medium text-foreground">{{ t('auth.register.code') }}</label>
             <div class="relative">
               <ShieldCheck class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input 
+              <Input
                 v-model="code"
-                type="text" 
-                :placeholder="t('auth.register.codePlaceholder')" 
+                type="text"
+                :placeholder="t('auth.register.codePlaceholder')"
                 class="pl-10 h-12 bg-surface border-border/50 focus:border-primary pr-28"
                 autocomplete="one-time-code"
                 :disabled="isLoading"
                 required
               />
-              <button 
-                type="button" 
+              <button
+                type="button"
                 @click="handleSendCode"
                 :disabled="isSendingCode || isLoading || !email"
                 class="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-medium text-primary hover:text-primary/80 px-2 py-1.5 rounded-md hover:bg-primary/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -159,8 +159,8 @@ const handleRegister = async () => {
             {{ t(errorKey) }}
           </p>
 
-          <Button 
-            type="submit" 
+          <Button
+            type="submit"
             class="w-full h-12 text-base font-bold mt-2 shadow-glow"
             :disabled="isLoading"
           >

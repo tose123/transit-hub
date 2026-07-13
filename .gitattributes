@@ -1,0 +1,6 @@
+* text=auto eol=crlf
+
+scripts/update-star-history.mjs text eol=lf
+
+*.png binary
+*.jpg binary

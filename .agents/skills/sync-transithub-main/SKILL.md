@@ -73,7 +73,7 @@ git switch main
 执行：
 
 ```bash
-git merge --no-edit -X ours transithub/main
+git -c merge.renormalize=true merge --no-edit -X ours transithub/main
 ```
 
 `-X ours` 仅令冲突文本块优先采用当前本地 `main`，并非丢弃全部上游改动。记录合并输出，以区分快进、already up-to-date、普通 merge commit 及冲突合并。
@@ -104,7 +104,7 @@ git add <已解决文件>
 git commit --no-edit
 ```
 
-不得暂存无关文件。完成后再次扫描冲突标记，并运行 `git diff --check "$LOCAL_BEFORE"..HEAD`。
+不得暂存无关文件。完成后再次扫描冲突标记，并运行 `git -c core.whitespace=cr-at-eol diff --check "$LOCAL_BEFORE"..HEAD`。
 
 ### 6. 分析同步内容
 
