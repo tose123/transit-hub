@@ -905,6 +905,8 @@ export default {
         historyRecharge: '历史充值',
         groupName: '分组名称',
         groupMultiplier: '分组倍率',
+        group: '分组',
+        multiplier: '倍率',
         availableGroups: '可用分组',
         viewAvailableGroups: '查看可用分组',
         closeGroupsModal: '关闭',

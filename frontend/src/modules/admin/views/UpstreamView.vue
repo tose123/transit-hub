@@ -6,8 +6,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tooltip } from '@/components/ui/tooltip'
 import { getStrategySettings } from '../api/settings'
+import { listUpstreamKeys } from '../api/mySites'
 import { useUpstreamSites } from '../composables/useUpstreamSites'
 import SiteSettingsModal from '../components/upstream/SiteSettingsModal.vue'
+import type { UpstreamKeyItem } from '../types/mySites'
 import type { UpstreamGroupInfo, UpstreamMetricValue, UpstreamSite, UpstreamSiteForm, UpstreamStatus } from '../types/upstream'
 
 const { t } = useI18n()
@@ -176,16 +178,37 @@ const deletingSite = computed(() => upstreamSites.value.find((site) => site.id =
 // Groups Modal Logic
 const isGroupsModalOpen = ref(false)
 const selectedSiteForGroups = ref<UpstreamSite | null>(null)
+const upstreamKeys = ref<UpstreamKeyItem[]>([])
+const isLoadingUpstreamKeys = ref(false)
 
-const openGroupsModal = (site: UpstreamSite) => {
+const openGroupsModal = async (site: UpstreamSite) => {
   selectedSiteForGroups.value = site
   isGroupsModalOpen.value = true
+  upstreamKeys.value = []
+  isLoadingUpstreamKeys.value = true
+  try {
+    const keys = await listUpstreamKeys(site.id)
+    if (selectedSiteForGroups.value?.id === site.id) upstreamKeys.value = keys
+  } catch {
+    if (selectedSiteForGroups.value?.id === site.id) upstreamKeys.value = []
+  } finally {
+    if (selectedSiteForGroups.value?.id === site.id) isLoadingUpstreamKeys.value = false
+  }
 }
 
 const closeGroupsModal = () => {
   isGroupsModalOpen.value = false
   selectedSiteForGroups.value = null
+  upstreamKeys.value = []
+  isLoadingUpstreamKeys.value = false
 }
+
+const groupKeyNames = (group: UpstreamGroupInfo): string[] => Array.from(new Set(
+  upstreamKeys.value
+    .filter((key) => key.groupId === group.id || key.groupName === group.name)
+    .map((key) => key.name)
+    .filter(Boolean),
+))
 
 const isSiteSettingsOpen = ref(false)
 const selectedSiteForSettings = ref<UpstreamSite | null>(null)
@@ -670,33 +693,59 @@ onBeforeUnmount(() => {
                 <div class="w-1.5 h-1.5 rounded-full bg-primary"></div>
                 {{ platform }}
               </h4>
-              <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                <button
-                  v-for="group in groups"
-                  :key="group.name"
-                  class="flex flex-col items-center justify-center p-3 rounded-xl border border-border/60 bg-surface/50 hover:bg-surface hover:border-primary/50 transition-colors text-center group"
-                >
-                  <span class="text-sm font-medium text-foreground truncate w-full group-hover:text-primary transition-colors">{{ group.name }}</span>
-                  <span
-                    v-if="group.multiplier !== null && selectedSiteForGroups && selectedSiteForGroups.rechargeRate > 0"
-                    class="mt-2 text-xs font-semibold text-primary px-2 py-0.5 rounded-md bg-primary/10 border border-primary/20"
-                  >
-                    {{ (group.multiplier * selectedSiteForGroups.rechargeRate).toFixed(2) }}
-                  </span>
-                  <template v-if="group.hasDedicatedMultiplier">
-                    <Tooltip :text="t('admin.upstream.fields.dedicatedMultiplierTooltip')" wide>
-                      <span class="text-[10px] text-muted-foreground mt-1">
-                        {{ group.defaultMultiplierDisplay }} -&gt; {{ group.dedicatedMultiplierDisplay }}
-                      </span>
-                    </Tooltip>
-                    <span class="mt-1 text-[9px] font-semibold text-accent px-1.5 py-0.5 rounded bg-accent/10 border border-accent/20">
-                      {{ t('admin.upstream.fields.dedicatedMultiplierBadge') }}
-                    </span>
-                  </template>
-                  <span v-else class="text-[10px] text-muted-foreground mt-1">
-                    {{ group.multiplierDisplay }}
-                  </span>
-                </button>
+              <div class="overflow-x-auto rounded-xl border border-border/60">
+                <table class="w-full table-fixed text-left text-sm">
+                  <colgroup>
+                    <col class="w-28" />
+                    <col />
+                    <col class="w-40" />
+                  </colgroup>
+                  <thead class="bg-surface/50 text-xs font-medium text-muted-foreground">
+                    <tr class="border-b border-border/40">
+                      <th class="px-4 py-3">ID</th>
+                      <th class="px-4 py-3">{{ t('admin.upstream.fields.group') }}</th>
+                      <th class="px-4 py-3">{{ t('admin.upstream.fields.multiplier') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-border/40">
+                    <tr v-for="group in groups" :key="group.id" class="transition-colors hover:bg-surface/30">
+                      <td class="px-4 py-3 align-middle font-mono text-xs text-muted-foreground">
+                        <span class="block truncate">{{ group.id }}</span>
+                      </td>
+                      <td class="min-w-0 px-4 py-3 align-top">
+                        <Tooltip :text="group.name" wide class="w-full min-w-0">
+                          <span class="block w-full truncate font-medium text-foreground">{{ group.name }}</span>
+                        </Tooltip>
+                        <span class="mt-1 block truncate text-xs text-muted-foreground">
+                          {{ isLoadingUpstreamKeys ? '...' : groupKeyNames(group).join('、') || '-' }}
+                        </span>
+                      </td>
+                      <td class="px-4 py-3 align-top">
+                        <div class="flex flex-col items-start gap-1.5">
+                          <span
+                            v-if="group.multiplier !== null && selectedSiteForGroups && selectedSiteForGroups.rechargeRate > 0"
+                            class="text-xs font-semibold text-primary px-2 py-0.5 rounded-md bg-primary/10 border border-primary/20"
+                          >
+                            {{ (group.multiplier * selectedSiteForGroups.rechargeRate).toFixed(2) }}
+                          </span>
+                          <template v-if="group.hasDedicatedMultiplier">
+                            <Tooltip :text="t('admin.upstream.fields.dedicatedMultiplierTooltip')" wide>
+                              <span class="text-[10px] text-muted-foreground">
+                                {{ group.defaultMultiplierDisplay }} -&gt; {{ group.dedicatedMultiplierDisplay }}
+                              </span>
+                            </Tooltip>
+                            <span class="text-[9px] font-semibold text-accent px-1.5 py-0.5 rounded bg-accent/10 border border-accent/20">
+                              {{ t('admin.upstream.fields.dedicatedMultiplierBadge') }}
+                            </span>
+                          </template>
+                          <span v-else class="text-[10px] text-muted-foreground">
+                            {{ group.multiplierDisplay }}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>

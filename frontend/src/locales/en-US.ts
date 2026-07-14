@@ -905,6 +905,8 @@ export default {
         historyRecharge: 'History Recharge',
         groupName: 'Group Name',
         groupMultiplier: 'Group Multiplier',
+        group: 'Group',
+        multiplier: 'Multiplier',
         availableGroups: 'Available Groups',
         viewAvailableGroups: 'View Available Groups',
         closeGroupsModal: 'Close',
