@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -20,6 +21,8 @@ import (
 	"transithub/backend/internal/modules/group_rate_campaigns"
 	"transithub/backend/internal/modules/group_rates"
 	"transithub/backend/internal/modules/health"
+	"transithub/backend/internal/modules/leaderboard"
+	"transithub/backend/internal/modules/lottery"
 	"transithub/backend/internal/modules/mass_email"
 	"transithub/backend/internal/modules/my_sites"
 	"transithub/backend/internal/modules/settings"
@@ -37,10 +40,14 @@ const (
 )
 
 type Server struct {
-	cfg         config.Config
-	mux         *http.ServeMux
-	allowed     map[string]struct{}
-	authService *auth.Service
+	cfg                            config.Config
+	mux                            *http.ServeMux
+	allowed                        map[string]struct{}
+	authService                    *auth.Service
+	leaderboardFrameAncestorOrigin func(ctx context.Context, embedToken string) (string, bool)
+	lotteryFrameAncestorOrigin     func(ctx context.Context, embedToken string) (string, bool)
+	lotteryCancel                  context.CancelFunc
+	lotteryWorker                  *lottery.Worker
 }
 
 func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server {
@@ -107,6 +114,36 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 	ticketsService.SetSub2APIAdminClient(platformService)
 	tickets.RegisterRoutes(server.mux, ticketsService)
 
+	// 排行榜模块：后台接口复用当前 workspace 的 dashboard admin session；公开 embed 接口
+	// 不进入 TransitHub 登录态，由独立 embed token + Sub2API viewer token 换取短期 Redis session。
+	leaderboardRepository := leaderboard.NewRepository(db)
+	leaderboardSessions := leaderboard.NewEmbedSessionStore(redisClient)
+	leaderboardSub2APIClient := leaderboard.NewSub2APIClient(&http.Client{Timeout: upstreamRequestTimeout})
+	leaderboardService := leaderboard.NewService(leaderboardRepository, leaderboardSessions, leaderboardSub2APIClient, platformService, mySitesService)
+	leaderboardService.SetAdminAccountResolver(adminAccountsService)
+	if err := leaderboardService.EnsureSchema(context.Background()); err != nil {
+		panic(err)
+	}
+	server.leaderboardFrameAncestorOrigin = leaderboardService.FrameAncestorOrigin
+	leaderboard.RegisterRoutes(server.mux, leaderboardService)
+
+	lotteryRepository := lottery.NewRepository(db)
+	lotterySessions := lottery.NewEmbedSessionStore(redisClient)
+	if cfg.LotteryAllowPrivateSub2APITargets {
+		log.Printf("[lottery] WARNING: private Sub2API targets are enabled for local debugging; do not enable this in production")
+	}
+	lotteryViewerClient := lottery.NewSub2APIViewerClientWithPrivateTargets(&http.Client{Timeout: upstreamRequestTimeout}, cfg.LotteryAllowPrivateSub2APITargets)
+	lotteryRewardClient := lottery.NewRewardClientWithPrivateTargets(&http.Client{Timeout: upstreamRequestTimeout}, cfg.LotteryAllowPrivateSub2APITargets)
+	lotteryService := lottery.NewService(lotteryRepository, lotterySessions, lotteryViewerClient, lotteryRewardClient, mySitesService)
+	lotteryService.SetAdminAccountResolver(adminAccountsService)
+	lotteryService.SetSubscriptionGroupProvider(platformService)
+	lotteryService.SetAllowPrivateTargets(cfg.LotteryAllowPrivateSub2APITargets)
+	if err := lotteryService.EnsureSchema(context.Background()); err != nil {
+		panic(err)
+	}
+	server.lotteryFrameAncestorOrigin = lotteryService.FrameAncestorOrigin
+	lottery.RegisterRoutes(server.mux, lotteryService)
+
 	settingsService := settings.NewService(http.DefaultClient, settings.NewRepository(db))
 	settingsService.SetAdminAccountResolver(adminAccountsService)
 	if err := settingsService.EnsureSchema(context.Background()); err != nil {
@@ -132,9 +169,6 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 		panic(err)
 	}
 	admin_accounts.RegisterRoutes(server.mux, adminAccountsService)
-	if err := upstreamService.RestoreSavedSites(context.Background()); err != nil {
-		panic(err)
-	}
 
 	// 注入机器人通知能力，供自动调价成功后发送通知。
 	mySitesService.SetBotNotifier(settingsService)
@@ -152,7 +186,6 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 	}
 	mass_email.RegisterRoutes(server.mux, massEmailService, adminAccountsService)
 	massEmailWorker := mass_email.NewWorker(massEmailService)
-	massEmailWorker.Start(context.Background())
 
 	// 活动调价中心：批量修改 admin 自有分组倍率的独立模块，不复用/不污染 my_sites 的自动调价逻辑。
 	// mySitesService 提供 admin 会话与分组倍率读写能力，groupRatesService 提供分组类型标签查询，
@@ -175,7 +208,6 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 	}
 	campaignsService.SetAdminAccountResolver(adminAccountsService)
 	group_rate_campaigns.RegisterRoutes(server.mux, campaignsService, adminAccountsService)
-	campaignsService.StartScheduler(context.Background())
 
 	// 分组健康探活模块：数据源为 real_connections（通过 mySitesService 只读接口），
 	// upstreamService 提供站点 base_url/平台类型查询，platformService 提供 new-api 远端降级/恢复能力。
@@ -194,6 +226,23 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 	// 分组下账号/渠道，叠加 real_connections 探活状态。platformService 已实现所需方法。
 	connHealthService.SetPlatformGroupReader(platformService)
 	connection_health.RegisterRoutes(server.mux, connHealthService)
+
+	// 所有 workspace 表 schema 完成后再补 legacy 归属；随后才启动 restore、worker 和 scheduler，
+	// 避免后台任务在旧行尚未补齐 workspace 时读取或写回数据。
+	if err := adminAccountsService.AssignLegacyRows(context.Background()); err != nil {
+		panic(err)
+	}
+	if err := upstreamService.RestoreSavedSites(context.Background()); err != nil {
+		panic(err)
+	}
+	massEmailWorker.Start(context.Background())
+	campaignsService.StartScheduler(context.Background())
+	lotteryCtx, lotteryCancel := context.WithCancel(context.Background())
+	lotteryWorker := lottery.NewWorker(lotteryService)
+	lotteryWorker.Start(lotteryCtx)
+	lotteryService.StartScheduler(lotteryCtx)
+	server.lotteryCancel = lotteryCancel
+	server.lotteryWorker = lotteryWorker
 	connHealthService.StartScheduler(context.Background())
 
 	// 策略设置变更时通知上游服务更新定时同步配置。
@@ -230,6 +279,15 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 	dashboardService := dashboard.NewService(dashboardSessionStore, platformService)
 	dashboardService.SetAdminAccountService(adminAccountsService)
 	dashboardService.SetMySiteSync(mySitesService)
+	adminAccountsService.SetWorkspaceCleanup(workspaceCleanup{
+		dashboardSessions:   dashboardSessionStore,
+		ticketSessions:      ticketsSessions,
+		leaderboardSessions: leaderboardSessions,
+		lotterySessions:     lotterySessions,
+		attachments:         ticketsStorage,
+		upstreamSites:       upstreamService,
+	})
+	adminAccountsService.StartCleanupWorker(context.Background(), time.Minute)
 	dashboardService.StartRefresher(context.Background())
 
 	// 仪表盘指标服务：实时计算五项核心指标 + 历史趋势快照。
@@ -250,6 +308,79 @@ type groupRateSnapshotWriter struct {
 	service *group_rates.Service
 }
 
+type dashboardSessionCleaner interface {
+	Delete(ctx context.Context, userID string, adminAccountID string) error
+}
+
+type ticketEmbedSessionCleaner interface {
+	DeleteWorkspace(ctx context.Context, userID string, adminAccountID string) error
+}
+
+type leaderboardEmbedSessionCleaner interface {
+	DeleteWorkspace(ctx context.Context, userID string, adminAccountID string) error
+}
+
+type lotteryEmbedSessionCleaner interface {
+	DeleteWorkspace(ctx context.Context, userID string, adminAccountID string) error
+}
+
+type attachmentCleaner interface {
+	Delete(storagePath string) error
+}
+
+type upstreamSiteCleaner interface {
+	CleanupDeletedWorkspaceSites(ctx context.Context, userID string, siteIDs []string) error
+}
+
+type workspaceCleanup struct {
+	dashboardSessions   dashboardSessionCleaner
+	ticketSessions      ticketEmbedSessionCleaner
+	leaderboardSessions leaderboardEmbedSessionCleaner
+	lotterySessions     lotteryEmbedSessionCleaner
+	attachments         attachmentCleaner
+	upstreamSites       upstreamSiteCleaner
+}
+
+func (c workspaceCleanup) CleanupDeletedWorkspace(ctx context.Context, payload admin_accounts.WorkspaceCleanupPayload) error {
+	var errs []error
+	if c.dashboardSessions != nil {
+		if err := c.dashboardSessions.Delete(ctx, payload.UserID, payload.AdminAccountID); err != nil {
+			errs = append(errs, fmt.Errorf("dashboard session cleanup: %w", err))
+		}
+	}
+	if c.ticketSessions != nil {
+		if err := c.ticketSessions.DeleteWorkspace(ctx, payload.UserID, payload.AdminAccountID); err != nil {
+			errs = append(errs, fmt.Errorf("ticket embed session cleanup: %w", err))
+		}
+	}
+	if c.leaderboardSessions != nil {
+		if err := c.leaderboardSessions.DeleteWorkspace(ctx, payload.UserID, payload.AdminAccountID); err != nil {
+			errs = append(errs, fmt.Errorf("leaderboard embed session cleanup: %w", err))
+		}
+	}
+	if c.lotterySessions != nil {
+		if err := c.lotterySessions.DeleteWorkspace(ctx, payload.UserID, payload.AdminAccountID); err != nil {
+			errs = append(errs, fmt.Errorf("lottery embed session cleanup: %w", err))
+		}
+	}
+	if c.upstreamSites != nil {
+		if err := c.upstreamSites.CleanupDeletedWorkspaceSites(ctx, payload.UserID, payload.UpstreamSiteIDs); err != nil {
+			errs = append(errs, fmt.Errorf("upstream site cleanup: %w", err))
+		}
+	}
+	if c.attachments != nil {
+		for _, path := range payload.AttachmentStoragePaths {
+			if strings.TrimSpace(path) == "" {
+				continue
+			}
+			if err := c.attachments.Delete(path); err != nil {
+				errs = append(errs, fmt.Errorf("ticket attachment cleanup %q: %w", path, err))
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func (w groupRateSnapshotWriter) SaveSiteSnapshot(ctx context.Context, userID string, adminAccountID string, siteID string, siteName string, sitePlatform upstream.Platform, groups []upstream.SnapshotGroup) error {
 	snapshots := make([]group_rates.SnapshotGroup, 0, len(groups))
 	for _, group := range groups {
@@ -268,6 +399,7 @@ func (s *Server) Handler() http.Handler {
 	static := staticHandler(s.cfg.PublicDir)
 
 	return s.logRequests(s.cors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.setSecurityHeaders(w, r)
 		if !strings.HasPrefix(r.URL.Path, apiPrefix) {
 			static.ServeHTTP(w, r)
 			return
@@ -284,8 +416,58 @@ func (s *Server) Handler() http.Handler {
 	})))
 }
 
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s.lotteryCancel != nil {
+		s.lotteryCancel()
+	}
+	if s.lotteryWorker == nil {
+		return nil
+	}
+	s.lotteryWorker.Stop()
+	done := make(chan struct{})
+	go func() {
+		s.lotteryWorker.Wait()
+		close(done)
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-done:
+		return nil
+	}
+}
+
 func (s *Server) protectedPath(path string) bool {
-	return strings.HasPrefix(path, "/api/admin-accounts") || strings.HasPrefix(path, "/api/upstream-sites") || strings.HasPrefix(path, "/api/group-rates") || strings.HasPrefix(path, "/api/group-rate-campaigns") || strings.HasPrefix(path, "/api/my-sites") || strings.HasPrefix(path, "/api/settings") || strings.HasPrefix(path, "/api/dashboard") || strings.HasPrefix(path, "/api/system") || strings.HasPrefix(path, "/api/connection-health") || strings.HasPrefix(path, "/api/tickets") || strings.HasPrefix(path, "/api/mass-email")
+	return strings.HasPrefix(path, "/api/admin-accounts") || strings.HasPrefix(path, "/api/upstream-sites") || strings.HasPrefix(path, "/api/group-rates") || strings.HasPrefix(path, "/api/group-rate-campaigns") || strings.HasPrefix(path, "/api/my-sites") || strings.HasPrefix(path, "/api/settings") || strings.HasPrefix(path, "/api/dashboard") || strings.HasPrefix(path, "/api/system") || strings.HasPrefix(path, "/api/connection-health") || strings.HasPrefix(path, "/api/tickets") || strings.HasPrefix(path, "/api/leaderboard") || strings.HasPrefix(path, "/api/lottery") || strings.HasPrefix(path, "/api/mass-email")
+}
+
+func (s *Server) setSecurityHeaders(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+	if r.Method == http.MethodGet && r.URL.Path == "/embed/leaderboard" {
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		origin := ""
+		if s.leaderboardFrameAncestorOrigin != nil {
+			origin, _ = s.leaderboardFrameAncestorOrigin(r.Context(), r.URL.Query().Get("embed_token"))
+		}
+		if origin == "" {
+			w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+			return
+		}
+		w.Header().Set("Content-Security-Policy", "frame-ancestors "+origin)
+	}
+	if r.Method == http.MethodGet && r.URL.Path == "/embed/lottery" {
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		origin := ""
+		if s.lotteryFrameAncestorOrigin != nil {
+			origin, _ = s.lotteryFrameAncestorOrigin(r.Context(), r.URL.Query().Get("embed_token"))
+		}
+		if origin == "" {
+			w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+			return
+		}
+		w.Header().Set("Content-Security-Policy", "frame-ancestors "+origin)
+	}
 }
 
 func bearerToken(header string) string {
@@ -424,6 +606,7 @@ func checkBalanceWarning(ctx context.Context, svc *settings.Service, uSvc *upstr
 // checkMultiplierChanges 对比同步前后的分组倍率，任何变化都发送通知。
 // 只受系统设置全局开关 strategy.EnableMultiplierAlert 控制。
 func checkMultiplierChanges(ctx context.Context, svc *settings.Service, strategy settings.StrategySettings, userID, siteID, siteName string, oldMetrics, newMetrics upstream.Metrics) {
+	_ = siteID
 	if !strategy.EnableMultiplierAlert || len(strategy.MultiplierNotifyBotIDs) == 0 {
 		return
 	}

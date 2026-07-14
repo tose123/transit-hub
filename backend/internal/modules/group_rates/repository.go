@@ -16,6 +16,8 @@ type Repository struct {
 	db *pgxpool.Pool
 }
 
+const mappedExistsWorkspacePredicate = "states.admin_account_id = $2"
+
 func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{db: db}
 }
@@ -212,7 +214,8 @@ func (r *Repository) InsertSnapshots(ctx context.Context, records []snapshotReco
 	for _, record := range records {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO group_rate_snapshots (id, user_id, admin_account_id, site_id, site_name, group_id, group_name, platform, type, multiplier, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+			WHERE EXISTS (SELECT 1 FROM admin_accounts WHERE user_id = $2 AND id = $3)
 		`, record.ID, record.UserID, record.AdminAccountID, record.SiteID, record.SiteName, record.GroupID, record.GroupName, record.Platform, record.Type, record.Multiplier, record.CreatedAt); err != nil {
 			return err
 		}
@@ -292,6 +295,7 @@ func (r *Repository) List(ctx context.Context, userID string, adminAccountID str
 				CROSS JOIN LATERAL jsonb_array_elements(states.mappings) AS mapping
 				CROSS JOIN LATERAL jsonb_array_elements(mapping->'upstreamTargets') AS target
 				WHERE states.user_id = latest.user_id
+					AND `+mappedExistsWorkspacePredicate+`
 					AND target->>'siteId' = latest.site_id
 					AND target->>'groupName' = latest.group_name
 			) AS mapped

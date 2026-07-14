@@ -918,7 +918,7 @@ func (s *PlatformService) fetchSub2APIKeyUsageToday(session Session) ([]KeyUsage
 // token 记录自带分组字段时直接按 token_name+group 查询；否则仅按 token_name 查询自助统计接口
 // （沿用已验证的 self 统计能力，不做 token×全部分组的穷举以控制并发/请求量）。
 // 并发上限 maxKeyConcurrency，只保留今日 quota 换算金额 > 0 的 token。
-func (s *PlatformService) fetchNewAPIKeyUsageToday(session Session, groups []GroupInfo) ([]KeyUsageTodayStat, error) {
+func (s *PlatformService) fetchNewAPIKeyUsageToday(session Session, _ []GroupInfo) ([]KeyUsageTodayStat, error) {
 	if session.Platform != PlatformNewAPI || strings.TrimSpace(session.Cookie) == "" {
 		return nil, newRequestError(ErrorAuth, PlatformNewAPI)
 	}
@@ -2119,11 +2119,107 @@ var (
 )
 
 var sub2APIAdminUsersSortKeys = map[string]struct{}{
-	"created_at": {},
-	"email":      {},
-	"username":   {},
-	"status":     {},
-	"role":       {},
+	"created_at":   {},
+	"email":        {},
+	"username":     {},
+	"status":       {},
+	"role":         {},
+	"total_tokens": {},
+}
+
+// FetchSub2APIAdminUserBreakdown reads Sub2API's admin dashboard user breakdown
+// endpoint with a narrow query surface. It is intentionally separate from the
+// generic admin users list because this endpoint is usage-period based and the
+// upstream end_date is exclusive.
+func (s *PlatformService) FetchSub2APIAdminUserBreakdown(session Session, query Sub2APIUserBreakdownQuery) (Sub2APIUserBreakdown, error) {
+	if session.Platform != PlatformSub2API || strings.TrimSpace(session.AccessToken) == "" {
+		return Sub2APIUserBreakdown{}, newRequestError(ErrorAuth, PlatformSub2API)
+	}
+	query = normalizeSub2APIUserBreakdownQuery(query)
+	values := url.Values{}
+	values.Set("start_date", query.StartDate)
+	values.Set("end_date", query.EndDate)
+	values.Set("sort_by", query.SortBy)
+	values.Set("limit", strconv.Itoa(query.Limit))
+	values.Set("timezone", query.Timezone)
+	requestURL := session.BaseURL + "/api/v1/admin/dashboard/user-breakdown?" + values.Encode()
+	response, err := s.httpClient.requestJSON(requestURL, requestOptions{AccessToken: session.AccessToken, TokenType: session.TokenType})
+	if err != nil {
+		return Sub2APIUserBreakdown{}, err
+	}
+	return parseSub2APIUserBreakdown(response.Payload, query), nil
+}
+
+func normalizeSub2APIUserBreakdownQuery(query Sub2APIUserBreakdownQuery) Sub2APIUserBreakdownQuery {
+	query.StartDate = strings.TrimSpace(query.StartDate)
+	query.EndDate = strings.TrimSpace(query.EndDate)
+	query.SortBy = strings.TrimSpace(query.SortBy)
+	if query.SortBy != "total_tokens" {
+		query.SortBy = "total_tokens"
+	}
+	if query.Limit < 1 {
+		query.Limit = 50
+	}
+	if query.Limit > 200 {
+		query.Limit = 200
+	}
+	query.Timezone = strings.TrimSpace(query.Timezone)
+	if query.Timezone == "" {
+		query.Timezone = "Asia/Shanghai"
+	}
+	return query
+}
+
+func parseSub2APIUserBreakdown(payload any, fallback Sub2APIUserBreakdownQuery) Sub2APIUserBreakdown {
+	data := dataRecord(payload)
+	usersRaw, _ := data["users"].([]any)
+	if len(usersRaw) == 0 {
+		usersRaw = dataArray(payload)
+	}
+	users := make([]Sub2APIUserBreakdownItem, 0, len(usersRaw))
+	for _, raw := range usersRaw {
+		record := dataRecord(raw)
+		user := Sub2APIUserBreakdownItem{
+			UserID:       firstStringy(record, sub2APIUserIDKeys),
+			Email:        safeString(record, "email"),
+			Requests:     intFromRecord(record, []string{"requests"}, 0),
+			InputTokens:  int64FromRecord(record, []string{"input_tokens", "inputTokens"}),
+			OutputTokens: int64FromRecord(record, []string{"output_tokens", "outputTokens"}),
+			CacheTokens:  int64FromRecord(record, []string{"cache_tokens", "cacheTokens"}),
+			TotalTokens:  int64FromRecord(record, []string{"total_tokens", "totalTokens"}),
+			Cost:         floatFromRecord(record, []string{"cost"}),
+			ActualCost:   floatFromRecord(record, []string{"actual_cost", "actualCost"}),
+		}
+		if user.UserID != "" {
+			users = append(users, user)
+		}
+	}
+	return Sub2APIUserBreakdown{
+		Users:     users,
+		StartDate: stringFromRecord(data, []string{"start_date", "startDate"}, fallback.StartDate),
+		EndDate:   stringFromRecord(data, []string{"end_date", "endDate"}, fallback.EndDate),
+	}
+}
+
+func int64FromRecord(record map[string]any, keys []string) int64 {
+	if number := firstNumber(record, keys); number != nil {
+		return int64(*number)
+	}
+	return 0
+}
+
+func floatFromRecord(record map[string]any, keys []string) float64 {
+	if number := firstNumber(record, keys); number != nil {
+		return *number
+	}
+	return 0
+}
+
+func stringFromRecord(record map[string]any, keys []string, fallback string) string {
+	if value := firstString(record, keys); value != nil {
+		return *value
+	}
+	return fallback
 }
 
 // FetchSub2APIAdminUsersPage 透传 Sub2API admin 用户列表。查询参数只允许分页、status/role、search、排序和时区，

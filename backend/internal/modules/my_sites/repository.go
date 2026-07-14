@@ -3,11 +3,15 @@ package my_sites
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// StateMutation mutates the locked latest my_site_states row before it is saved in the same transaction.
+type StateMutation func(*State) error
 
 type Repository struct {
 	db *pgxpool.Pool
@@ -78,7 +82,14 @@ func (r *Repository) EnsureSchema(ctx context.Context) error {
 }
 
 func (r *Repository) Get(ctx context.Context, userID string, adminAccountID string) (*State, error) {
-	row := r.db.QueryRow(ctx, `SELECT user_id, admin_account_id, base_url, email, session, mappings, own_groups FROM my_site_states WHERE user_id = $1 AND admin_account_id = $2`, userID, adminAccountID)
+	return scanState(r.db.QueryRow(ctx, `SELECT user_id, admin_account_id, base_url, email, session, mappings, own_groups FROM my_site_states WHERE user_id = $1 AND admin_account_id = $2`, userID, adminAccountID))
+}
+
+type stateScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanState(row stateScanner) (*State, error) {
 	var state State
 	var sessionJSON []byte
 	var mappingsJSON []byte
@@ -101,16 +112,24 @@ func (r *Repository) Get(ctx context.Context, userID string, adminAccountID stri
 	return &state, nil
 }
 
+func marshalStateJSON(state State) (sessionJSON, mappingsJSON, ownGroupsJSON []byte, err error) {
+	sessionJSON, err = json.Marshal(state.Session)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	mappingsJSON, err = json.Marshal(state.Mappings)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	ownGroupsJSON, err = json.Marshal(state.OwnGroups)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return sessionJSON, mappingsJSON, ownGroupsJSON, nil
+}
+
 func (r *Repository) Save(ctx context.Context, state State) error {
-	sessionJSON, err := json.Marshal(state.Session)
-	if err != nil {
-		return err
-	}
-	mappingsJSON, err := json.Marshal(state.Mappings)
-	if err != nil {
-		return err
-	}
-	ownGroupsJSON, err := json.Marshal(state.OwnGroups)
+	sessionJSON, mappingsJSON, ownGroupsJSON, err := marshalStateJSON(state)
 	if err != nil {
 		return err
 	}
@@ -126,6 +145,53 @@ func (r *Repository) Save(ctx context.Context, state State) error {
 			updated_at = EXCLUDED.updated_at
 	`, state.UserID, state.AdminAccountID, state.BaseURL, state.Email, string(sessionJSON), string(mappingsJSON), string(ownGroupsJSON))
 	return err
+}
+
+// MutateState locks one workspace row and saves the caller's mutation in the same transaction.
+// Network calls must happen before this method so the lock is held only for the local JSON merge/write.
+func (r *Repository) MutateState(ctx context.Context, userID string, adminAccountID string, mutate StateMutation) (*State, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	state, err := scanState(tx.QueryRow(ctx, `SELECT user_id, admin_account_id, base_url, email, session, mappings, own_groups FROM my_site_states WHERE user_id = $1 AND admin_account_id = $2 FOR UPDATE`, userID, adminAccountID))
+	if err != nil {
+		return nil, err
+	}
+	if state == nil {
+		return nil, nil
+	}
+	if err := mutate(state); err != nil {
+		return nil, err
+	}
+	sessionJSON, mappingsJSON, ownGroupsJSON, err := marshalStateJSON(*state)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE my_site_states
+		SET base_url = $3,
+			email = $4,
+			session = $5::jsonb,
+			mappings = $6::jsonb,
+			own_groups = $7::jsonb,
+			updated_at = now()
+		WHERE user_id = $1 AND admin_account_id = $2
+	`, state.UserID, state.AdminAccountID, state.BaseURL, state.Email, string(sessionJSON), string(mappingsJSON), string(ownGroupsJSON)); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	committed = true
+	return state, nil
 }
 
 // SaveRealConnection 持久化一条真实对接绑定记录。
@@ -205,4 +271,54 @@ func (r *Repository) GetRealConnection(ctx context.Context, id string, userID st
 func (r *Repository) DeleteRealConnection(ctx context.Context, id string, userID string, adminAccountID string) error {
 	_, err := r.db.Exec(ctx, `DELETE FROM real_connections WHERE id = $1 AND user_id = $2 AND workspace_admin_account_id = $3`, id, userID, adminAccountID)
 	return err
+}
+
+// RemoveUpstreamMappingAndDeleteConnection atomically removes the mapping target and local connection row.
+func (r *Repository) RemoveUpstreamMappingAndDeleteConnection(ctx context.Context, userID string, adminAccountID string, connectionID string, siteID string, groupName string) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	state, err := scanState(tx.QueryRow(ctx, `SELECT user_id, admin_account_id, base_url, email, session, mappings, own_groups FROM my_site_states WHERE user_id = $1 AND admin_account_id = $2 FOR UPDATE`, userID, adminAccountID))
+	if err != nil {
+		return err
+	}
+	if state != nil {
+		removeMappingTargetFromState(state, siteID, groupName)
+		sessionJSON, mappingsJSON, ownGroupsJSON, err := marshalStateJSON(*state)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE my_site_states
+			SET base_url = $3,
+				email = $4,
+				session = $5::jsonb,
+				mappings = $6::jsonb,
+				own_groups = $7::jsonb,
+				updated_at = now()
+			WHERE user_id = $1 AND admin_account_id = $2
+		`, state.UserID, state.AdminAccountID, state.BaseURL, state.Email, string(sessionJSON), string(mappingsJSON), string(ownGroupsJSON)); err != nil {
+			return err
+		}
+	}
+	commandTag, err := tx.Exec(ctx, `DELETE FROM real_connections WHERE id = $1 AND user_id = $2 AND workspace_admin_account_id = $3`, connectionID, userID, adminAccountID)
+	if err != nil {
+		return err
+	}
+	if commandTag.RowsAffected() == 0 {
+		return fmt.Errorf("delete real connection: no rows affected")
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }

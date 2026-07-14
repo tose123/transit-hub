@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onBeforeUnmount, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { LayoutDashboard, Network, Settings, LogOut, Globe, Moon, Sun, Percent, Megaphone, ChevronDown, ArrowRightLeft, FolderTree, Link2, Activity, MessageSquare, Github, Mail, Menu, X } from 'lucide-vue-next'
+import { LayoutDashboard, Network, Settings, LogOut, Globe, Moon, Sun, Percent, Megaphone, ChevronDown, ArrowRightLeft, FolderTree, Link2, Activity, MessageSquare, Github, Mail, Menu, X, Trophy, Gift } from 'lucide-vue-next'
 import { useDark, useToggle } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAdminAccounts } from '../composables/useAdminAccounts'
@@ -26,7 +26,7 @@ const toggleLocale = () => {
   locale.value = locale.value === 'zh-CN' ? 'en-US' : 'zh-CN'
 }
 
-const { currentAccount, loadCurrentAccount } = useAdminAccounts()
+const { currentAccount, noticeKey, loadCurrentAccount } = useAdminAccounts()
 
 // 版本信息：开源版仅用于纯展示，不依赖授权/更新服务
 const versionInfo = ref<SystemVersionResponse | null>(null)
@@ -125,6 +125,8 @@ type MenuEntry =
 
 const menuItems = computed<MenuEntry[]>(() => [
   { type: 'leaf', name: t('admin.menu.dashboard'), path: '/admin', icon: LayoutDashboard },
+  { type: 'leaf', name: t('admin.menu.leaderboard'), path: '/admin/leaderboard', icon: Trophy },
+  { type: 'leaf', name: t('admin.menu.lottery'), path: '/admin/lottery', icon: Gift },
   { type: 'leaf', name: t('admin.menu.upstream'), path: '/admin/upstream', icon: Network },
   {
     type: 'group',
@@ -382,6 +384,9 @@ watch(
 
       <!-- Content Area -->
       <main class="flex-1 overflow-auto" :class="isWorkspaceSelectionPage ? '' : 'p-3 sm:p-6'">
+        <div v-if="!isWorkspaceSelectionPage && noticeKey" class="mb-4 rounded-lg border border-warning/40 bg-warning/10 p-4 text-sm text-warning">
+          {{ t(noticeKey) }}
+        </div>
         <router-view v-slot="{ Component }">
           <transition name="fade" mode="out-in">
             <component :is="Component" />

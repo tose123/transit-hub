@@ -282,6 +282,37 @@ type Sub2APIAdminUsersPage struct {
 	PagesKnown bool
 }
 
+// Sub2APIUserBreakdownQuery is the explicit contract for the Sub2API admin
+// leaderboard source endpoint. The upstream end_date is exclusive.
+type Sub2APIUserBreakdownQuery struct {
+	StartDate string
+	EndDate   string
+	SortBy    string
+	Limit     int
+	Timezone  string
+}
+
+// Sub2APIUserBreakdownItem is one user row from
+// /api/v1/admin/dashboard/user-breakdown. Optional token/cost fields stay at
+// zero when older Sub2API deployments omit them.
+type Sub2APIUserBreakdownItem struct {
+	UserID       string
+	Email        string
+	Requests     int
+	InputTokens  int64
+	OutputTokens int64
+	CacheTokens  int64
+	TotalTokens  int64
+	Cost         float64
+	ActualCost   float64
+}
+
+type Sub2APIUserBreakdown struct {
+	Users     []Sub2APIUserBreakdownItem
+	StartDate string
+	EndDate   string
+}
+
 // Sub2APIBalanceHistoryItem 是 Sub2API 用户余额/充值历史中的单条记录。
 type Sub2APIBalanceHistoryItem struct {
 	ID        string

@@ -6,6 +6,7 @@ const (
 	ErrorNoCurrentAccount = "admin.adminAccounts.errors.noCurrentAccount"
 	ErrorNotFound         = "admin.adminAccounts.errors.notFound"
 	ErrorRequest          = "admin.adminAccounts.errors.request"
+	DeleteConfirmation    = "DELETE WORKSPACE"
 )
 
 // Account describes one isolated admin workspace owned by a Transit Hub user.
@@ -33,6 +34,47 @@ type UpsertInput struct {
 
 type UpdateRequest struct {
 	DisplayName string `json:"displayName"`
+}
+
+type DeleteRequest struct {
+	Confirmation string `json:"confirmation"`
+}
+
+type DeleteResponse struct {
+	DeletedID             string `json:"deletedId"`
+	HasCurrent            bool   `json:"hasCurrent"`
+	CurrentAdminAccountID string `json:"currentAdminAccountId"`
+	CleanupComplete       bool   `json:"cleanupComplete"`
+	CleanupPending        bool   `json:"cleanupPending"`
+}
+
+type DeleteResult struct {
+	CleanupJobID           string
+	DeletedID              string
+	WasCurrent             bool
+	CurrentAdminAccountID  string
+	AttachmentStoragePaths []string
+	UpstreamSiteIDs        []string
+}
+
+type CleanupJob struct {
+	ID                     string
+	UserID                 string
+	AdminAccountID         string
+	AttachmentStoragePaths []string
+	UpstreamSiteIDs        []string
+	Attempts               int
+	NextAttemptAt          time.Time
+	LastError              string
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+}
+
+type WorkspaceCleanupPayload struct {
+	UserID                 string
+	AdminAccountID         string
+	AttachmentStoragePaths []string
+	UpstreamSiteIDs        []string
 }
 
 type requestError string
