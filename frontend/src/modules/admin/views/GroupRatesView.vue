@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { AlertCircle, ArrowUpDown, Edit3, History, Link2, Loader2, Megaphone, RefreshCw, Search, X } from 'lucide-vue-next'
@@ -54,6 +54,43 @@ const disconnectingRate = ref<GroupRate | null>(null)
 const disconnectMode = ref<'unlink' | 'full'>('unlink')
 const isDisconnecting = ref(false)
 const disconnectError = ref('')
+const isAnyDialogOpen = computed(() => Boolean(isHistoryOpen.value || editingRate.value || connectingRate.value || disconnectingRate.value))
+let previouslyFocusedElement: HTMLElement | null = null
+let previousBodyOverflow = ''
+
+const dialogFocusableSelector = [
+  'button:not([disabled])',
+  'a[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
+
+const handleDialogKeydown = (event: KeyboardEvent) => {
+  const dialog = document.querySelector<HTMLElement>('[data-group-rates-dialog]')
+  if (!dialog) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    if (disconnectingRate.value && !isDisconnecting.value) closeDisconnect()
+    else if (connectingRate.value && !isActionLoading.value) closeConnector()
+    else if (editingRate.value && !isActionLoading.value) closeTypeEditor()
+    else if (isHistoryOpen.value) closeHistory()
+    return
+  }
+  if (event.key !== 'Tab') return
+  const focusableElements = Array.from(dialog.querySelectorAll<HTMLElement>(dialogFocusableSelector))
+  if (focusableElements.length === 0) return
+  const first = focusableElements[0]
+  const last = focusableElements[focusableElements.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
 const selectedGroupType = ref('')
 const selectedChannelType = ref(0)
 const adminPlatform = ref('')
@@ -153,8 +190,28 @@ watch(searchQuery, (value) => {
   }, 300)
 })
 
+watch(isAnyDialogOpen, async (open) => {
+  if (open) {
+    previouslyFocusedElement = document.activeElement as HTMLElement | null
+    previousBodyOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    await nextTick()
+    document.querySelector<HTMLElement>('[data-group-rates-dialog] button:not([disabled]), [data-group-rates-dialog] input:not([disabled])')?.focus()
+    return
+  }
+  document.body.style.overflow = previousBodyOverflow
+  previouslyFocusedElement?.focus()
+  previouslyFocusedElement = null
+})
+
+onMounted(() => {
+  document.addEventListener('keydown', handleDialogKeydown)
+})
+
 onBeforeUnmount(() => {
   if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+  document.removeEventListener('keydown', handleDialogKeydown)
+  document.body.style.overflow = previousBodyOverflow
 })
 
 const isAdminNewAPI = computed(() => adminPlatform.value === 'newapi')
@@ -483,14 +540,17 @@ const historyRowKey = (row: GroupRateHistoryRow, index: number): string => (
 </script>
 
 <template>
-  <div class="h-[calc(100vh-8rem)] flex flex-col space-y-6">
-    <div class="flex items-center gap-1 rounded-xl bg-surface border border-border/50 p-1 w-fit shrink-0">
+  <div class="flex min-h-[calc(100dvh-8rem)] flex-col space-y-6 lg:h-[calc(100dvh-8rem)]">
+    <div class="flex max-w-full w-fit shrink-0 items-center gap-1 overflow-x-auto rounded-lg border border-border/50 bg-surface p-1" role="tablist" :aria-label="t('admin.menu.groupRates')">
       <button
         v-for="tab in (['all', 'mapped', 'unmapped', 'deleted'] as const)"
         :key="tab"
         type="button"
+        role="tab"
+        :aria-selected="mappedFilter === tab"
+        aria-controls="group-rates-panel"
         :class="[
-          'px-4 py-1.5 rounded-lg text-sm font-medium transition-all',
+          'shrink-0 rounded-md px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
           mappedFilter === tab
             ? 'bg-primary text-primary-foreground shadow-sm'
             : 'text-muted-foreground hover:text-foreground hover:bg-surface-elevated'
@@ -502,21 +562,25 @@ const historyRowKey = (row: GroupRateHistoryRow, index: number): string => (
     </div>
 
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
-      <div class="flex items-center gap-3 w-full sm:w-auto flex-1">
+      <div class="flex w-full flex-1 flex-col gap-3 sm:flex-row sm:flex-wrap lg:flex-nowrap">
         <div class="relative w-full sm:w-80 max-w-sm">
           <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             v-model="searchQuery"
+            name="groupRateSearch"
             type="text"
             :placeholder="t('admin.groupRates.filters.searchPlaceholder')"
-            class="w-full h-10 pl-10 pr-4 rounded-xl bg-surface border border-border/50 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all text-sm text-foreground placeholder:text-muted-foreground"
+            :aria-label="t('admin.groupRates.filters.searchPlaceholder')"
+            autocomplete="off"
+            spellcheck="false"
+            class="h-10 w-full rounded-lg border border-border/50 bg-surface pl-10 pr-4 text-sm text-foreground outline-none transition-[color,background-color,border-color,box-shadow] placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/30"
           />
         </div>
 
-        <div class="relative w-full sm:w-48">
+        <div class="relative w-full sm:w-48 sm:shrink-0">
           <select
             v-model="typeFilter"
-            class="h-10 w-full rounded-xl border border-border/50 bg-surface px-3 pr-8 text-sm text-foreground outline-none appearance-none transition-all focus:border-primary focus:ring-1 focus:ring-primary"
+            class="h-10 w-full appearance-none rounded-lg border border-border/50 bg-surface px-3 pr-8 text-sm text-foreground outline-none transition-[color,background-color,border-color,box-shadow] focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/30"
             @change="handleTypeChange"
           >
             <option value="">{{ t('admin.groupRates.common.allTypes') }}</option>
@@ -527,11 +591,11 @@ const historyRowKey = (row: GroupRateHistoryRow, index: number): string => (
           </div>
         </div>
 
-        <div class="relative w-full sm:w-52">
+        <div class="relative w-full sm:w-52 sm:shrink-0">
           <ArrowUpDown class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
           <select
             v-model="sortMode"
-            class="h-10 w-full rounded-xl border border-border/50 bg-surface pl-9 pr-8 text-sm text-foreground outline-none appearance-none transition-all focus:border-primary focus:ring-1 focus:ring-primary"
+            class="h-10 w-full appearance-none rounded-lg border border-border/50 bg-surface pl-9 pr-8 text-sm text-foreground outline-none transition-[color,background-color,border-color,box-shadow] focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/30"
           >
             <option value="multiplierAsc">{{ t('admin.groupRates.sort.multiplierAsc') }}</option>
             <option value="multiplierDesc">{{ t('admin.groupRates.sort.multiplierDesc') }}</option>
@@ -544,12 +608,12 @@ const historyRowKey = (row: GroupRateHistoryRow, index: number): string => (
         </div>
       </div>
 
-      <div class="flex items-center gap-2 w-full sm:w-auto shrink-0">
-        <Button variant="secondary" class="w-full sm:w-auto h-10 rounded-xl gap-2 shrink-0" @click="router.push('/admin/group-rate-campaigns?action=create')">
+      <div class="grid w-full shrink-0 grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2">
+        <Button variant="secondary" class="h-10 gap-2" @click="router.push('/admin/group-rate-campaigns?action=create')">
           <Megaphone class="h-4 w-4" />
           {{ t('admin.groupRates.actions.createCampaign') }}
         </Button>
-        <Button class="w-full sm:w-auto h-10 rounded-xl gap-2 bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm shrink-0" :disabled="isLoading" @click="loadRates">
+        <Button class="h-10 gap-2 shadow-sm" :disabled="isLoading" @click="loadRates">
           <Loader2 v-if="isLoading" class="h-4 w-4 animate-spin" />
           <RefreshCw v-else class="h-4 w-4" />
           {{ t('admin.groupRates.actions.refresh') }}
@@ -562,7 +626,7 @@ const historyRowKey = (row: GroupRateHistoryRow, index: number): string => (
       <span>{{ t(errorKey) }}</span>
     </div>
 
-    <div class="flex-1 min-h-0 overflow-hidden rounded-2xl border border-border/50 bg-card shadow-sm flex flex-col">
+    <div id="group-rates-panel" class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/50 bg-card shadow-sm" role="tabpanel">
       <div v-if="isLoading" class="flex flex-1 items-center justify-center text-muted-foreground">
         <Loader2 class="mr-2 h-5 w-5 animate-spin" />
         {{ t('admin.groupRates.status.loading') }}
@@ -681,10 +745,10 @@ const historyRowKey = (row: GroupRateHistoryRow, index: number): string => (
     </div>
 
     <div v-if="isHistoryOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-      <div class="w-full max-w-4xl overflow-hidden rounded-2xl border border-border/50 bg-card shadow-xl">
+      <div data-group-rates-dialog role="dialog" aria-modal="true" aria-labelledby="group-rate-history-title" tabindex="-1" class="max-h-[calc(100dvh-2rem)] w-full max-w-4xl overflow-hidden overscroll-contain rounded-xl border border-border/50 bg-card shadow-xl">
         <div class="flex items-start justify-between gap-4 border-b border-border/50 p-6">
           <div>
-            <h2 class="text-xl font-semibold text-foreground">{{ historyTitle }}</h2>
+            <h2 id="group-rate-history-title" class="text-xl font-semibold text-foreground">{{ historyTitle }}</h2>
             <p v-if="selectedRate" class="mt-2 text-sm text-muted-foreground">
               {{ t('admin.groupRates.history.subtitle', { platform: platformLabel(selectedRate.platform) }) }}
             </p>
@@ -756,13 +820,13 @@ const historyRowKey = (row: GroupRateHistoryRow, index: number): string => (
     </div>
 
     <div v-if="editingRate" class="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-      <div class="w-full max-w-md overflow-hidden rounded-2xl border border-border/50 bg-card shadow-xl">
+      <div data-group-rates-dialog role="dialog" aria-modal="true" aria-labelledby="group-rate-edit-title" tabindex="-1" class="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-xl border border-border/50 bg-card shadow-xl">
         <div class="flex items-start justify-between gap-4 border-b border-border/50 p-6">
           <div>
-            <h2 class="text-xl font-semibold text-foreground">{{ editTypeTitle }}</h2>
+            <h2 id="group-rate-edit-title" class="text-xl font-semibold text-foreground">{{ editTypeTitle }}</h2>
             <p class="mt-2 text-sm text-muted-foreground">{{ t('admin.groupRates.edit.description') }}</p>
           </div>
-          <button class="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-surface-line hover:text-foreground" :disabled="isActionLoading" @click="closeTypeEditor">
+          <button class="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-surface-line hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" :aria-label="t('admin.groupRates.actions.cancel')" :disabled="isActionLoading" @click="closeTypeEditor">
             <X class="h-5 w-5" />
             <span class="sr-only">{{ t('admin.groupRates.actions.closeEdit') }}</span>
           </button>
@@ -795,10 +859,10 @@ const historyRowKey = (row: GroupRateHistoryRow, index: number): string => (
     </div>
 
     <div v-if="connectingRate" class="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-      <div class="w-full max-w-lg overflow-hidden rounded-2xl border border-border/50 bg-card shadow-xl">
+      <div data-group-rates-dialog role="dialog" aria-modal="true" aria-labelledby="group-rate-connect-title" tabindex="-1" class="max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto overscroll-contain rounded-xl border border-border/50 bg-card shadow-xl">
         <div class="flex items-start justify-between gap-4 border-b border-border/50 p-6">
           <div>
-            <h2 class="text-xl font-semibold text-foreground">
+            <h2 id="group-rate-connect-title" class="text-xl font-semibold text-foreground">
               {{ t('admin.groupRates.connect.titleWithGroup', { site: connectingRate.siteName, group: connectingRate.groupName }) }}
             </h2>
             <p class="mt-2 text-sm text-muted-foreground">
@@ -992,10 +1056,10 @@ const historyRowKey = (row: GroupRateHistoryRow, index: number): string => (
     </div>
 
     <div v-if="disconnectingRate" class="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-      <div class="w-full max-w-md overflow-hidden rounded-2xl border border-border/50 bg-card shadow-xl">
+      <div data-group-rates-dialog role="dialog" aria-modal="true" aria-labelledby="group-rate-disconnect-title" tabindex="-1" class="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-xl border border-border/50 bg-card shadow-xl">
         <div class="flex items-start justify-between gap-4 border-b border-border/50 p-6">
           <div>
-            <h2 class="text-xl font-semibold text-foreground">{{ t('admin.groupRates.disconnect.title') }}</h2>
+            <h2 id="group-rate-disconnect-title" class="text-xl font-semibold text-foreground">{{ t('admin.groupRates.disconnect.title') }}</h2>
             <p class="mt-2 text-sm text-muted-foreground">
               {{ t('admin.groupRates.disconnect.description', { site: disconnectingRate.siteName, group: disconnectingRate.groupName }) }}
             </p>

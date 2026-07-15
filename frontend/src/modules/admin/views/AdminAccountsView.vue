@@ -62,7 +62,9 @@ onMounted(() => {
 
 const formatTime = (value: string | null): string => {
   if (!value) return '-'
-  return new Date(value).toLocaleString()
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  return new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(date)
 }
 
 const handleLogout = () => {
@@ -217,23 +219,23 @@ const handleAddSubmit = async (form: DashboardAdminLoginForm) => {
 </script>
 
 <template>
-  <div class="min-h-screen flex flex-col">
+  <div class="flex min-h-dvh flex-col">
     <!-- 轻量头部：logo + 工具按钮 -->
     <header class="h-16 shrink-0 flex items-center justify-between px-6 border-b border-border/40">
       <div class="flex items-center gap-2">
-        <img :src="logoUrl" :alt="t('brand.logoAlt')" class="h-8 w-8 shrink-0 object-contain" />
+        <img :src="logoUrl" :alt="t('brand.logoAlt')" width="32" height="32" class="h-8 w-8 shrink-0 object-contain" />
         <span class="text-xl font-bold tracking-tight text-foreground">{{ t('brand.name') }}</span>
       </div>
 
       <div class="flex items-center gap-2">
-        <button @click="toggleLocale" class="flex h-9 w-9 items-center justify-center rounded-full hover:bg-surface-elevated text-muted-foreground hover:text-foreground transition-colors" :title="t('admin.layout.toggleLanguage')">
+        <button @click="toggleLocale" class="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-surface-elevated hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" :title="t('admin.layout.toggleLanguage')" :aria-label="t('admin.layout.toggleLanguage')">
           <Globe class="h-4 w-4" />
         </button>
-        <button @click="toggleDark()" class="flex h-9 w-9 items-center justify-center rounded-full hover:bg-surface-elevated text-muted-foreground hover:text-foreground transition-colors" :title="t('admin.layout.toggleTheme')">
+        <button @click="toggleDark()" class="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-surface-elevated hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" :title="t('admin.layout.toggleTheme')" :aria-label="t('admin.layout.toggleTheme')">
           <Moon v-if="!isDark" class="h-4 w-4" />
           <Sun v-else class="h-4 w-4" />
         </button>
-        <button @click="handleLogout" class="flex h-9 w-9 items-center justify-center rounded-full hover:bg-surface-elevated text-muted-foreground hover:text-red-400 transition-colors" :title="t('admin.menu.signOut')">
+        <button @click="handleLogout" class="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-surface-elevated hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" :title="t('admin.menu.signOut')" :aria-label="t('admin.menu.signOut')">
           <LogOut class="h-4 w-4" />
         </button>
       </div>

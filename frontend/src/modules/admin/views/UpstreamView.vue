@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Search, Plus, CheckCircle2, XCircle, X, Loader2, AlertCircle, Trash2, Edit2, LayoutGrid, List, RefreshCw, Settings2 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,7 @@ import SiteSettingsModal from '../components/upstream/SiteSettingsModal.vue'
 import type { UpstreamKeyItem } from '../types/mySites'
 import type { UpstreamGroupInfo, UpstreamMetricValue, UpstreamSite, UpstreamSiteForm, UpstreamStatus } from '../types/upstream'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const searchQuery = ref('')
 const isAddModalOpen = ref(false)
@@ -96,11 +96,23 @@ const createEmptyForm = (): UpstreamSiteForm => ({
   accessToken: '',
   refreshToken: '',
   tokenType: 'Bearer',
+  userId: '',
   rechargeRate: 1,
   remark: '',
 })
 
 const newSiteForm = ref<UpstreamSiteForm>(createEmptyForm())
+
+watch(
+  () => newSiteForm.value.platform,
+  (platform) => {
+    if (platform === 'newapi' && newSiteForm.value.authMode === 'token') {
+      newSiteForm.value.authMode = 'password'
+    } else if (platform !== 'newapi' && newSiteForm.value.authMode === 'user_key') {
+      newSiteForm.value.authMode = 'password'
+    }
+  },
+)
 
 const handleAddSite = async () => {
   const success = editingSiteId.value
@@ -124,6 +136,7 @@ const handleEditSite = (site: UpstreamSite) => {
     accessToken: '',
     refreshToken: '',
     tokenType: 'Bearer',
+    userId: '',
     rechargeRate: site.rechargeRate > 0 ? site.rechargeRate : 1,
     remark: site.remark,
   }
@@ -253,7 +266,9 @@ const usdMetricDisplay = (metric: UpstreamMetricValue): string => {
 
 const lastUpdatedDisplay = (site: UpstreamSite): string => {
   if (!site.lastSyncedAt) return t('admin.upstream.fields.notSynced')
-  return new Date(site.lastSyncedAt).toLocaleString()
+  const value = new Date(site.lastSyncedAt)
+  if (Number.isNaN(value.getTime())) return t('admin.upstream.fields.notSynced')
+  return new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(value)
 }
 
 onMounted(() => {
@@ -266,7 +281,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="space-y-6">
+  <div class="mx-auto w-full max-w-[1600px] space-y-6">
     <!-- Top Action Bar -->
     <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
       <div class="flex flex-col gap-3 w-full sm:w-auto">
@@ -274,9 +289,13 @@ onBeforeUnmount(() => {
           <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             v-model="searchQuery"
+            name="upstreamSearch"
             type="text"
             :placeholder="t('admin.upstream.searchPlaceholder')"
-            class="w-full h-10 pl-10 pr-4 rounded-xl bg-surface border border-border/50 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all text-sm text-foreground placeholder:text-muted-foreground"
+            :aria-label="t('admin.upstream.searchPlaceholder')"
+            autocomplete="off"
+            spellcheck="false"
+            class="h-10 w-full rounded-lg border border-border/50 bg-surface pl-10 pr-4 text-sm text-foreground outline-none transition-[color,background-color,border-color,box-shadow] placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/30"
           />
         </div>
         <p class="text-xs text-muted-foreground">
@@ -284,21 +303,27 @@ onBeforeUnmount(() => {
         </p>
       </div>
 
-      <div class="flex items-center gap-2 w-full sm:w-auto">
-        <div class="flex items-center bg-surface border border-border/50 rounded-xl p-1 shrink-0">
+      <div class="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+        <div class="flex shrink-0 items-center rounded-lg border border-border/50 bg-surface p-1" role="group" :aria-label="t('admin.upstream.viewMode.list')">
           <button
+            type="button"
             @click="viewMode = 'list'"
             :class="{'bg-card shadow-sm text-foreground': viewMode === 'list', 'text-muted-foreground hover:text-foreground': viewMode !== 'list'}"
-            class="p-1.5 rounded-lg transition-all"
+            class="rounded-md p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             :title="t('admin.upstream.viewMode.list')"
+            :aria-label="t('admin.upstream.viewMode.list')"
+            :aria-pressed="viewMode === 'list'"
           >
             <List class="w-4 h-4" />
           </button>
           <button
+            type="button"
             @click="viewMode = 'card'"
             :class="{'bg-card shadow-sm text-foreground': viewMode === 'card', 'text-muted-foreground hover:text-foreground': viewMode !== 'card'}"
-            class="p-1.5 rounded-lg transition-all"
+            class="rounded-md p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             :title="t('admin.upstream.viewMode.card')"
+            :aria-label="t('admin.upstream.viewMode.card')"
+            :aria-pressed="viewMode === 'card'"
           >
             <LayoutGrid class="w-4 h-4" />
           </button>
@@ -306,12 +331,12 @@ onBeforeUnmount(() => {
         <div class="hidden md:flex h-10 items-center rounded-xl border border-border/50 bg-surface px-3 text-xs text-muted-foreground whitespace-nowrap">
           {{ countdownDisplay }}
         </div>
-        <Button :disabled="isRefreshing" @click="runRefresh" variant="secondary" class="w-full sm:w-auto h-10 rounded-xl px-4 gap-2">
+        <Button :disabled="isRefreshing" @click="runRefresh" variant="secondary" class="h-10 flex-1 gap-2 px-4 sm:flex-none">
           <Loader2 v-if="isRefreshing" class="w-4 h-4 animate-spin" />
           <RefreshCw v-else class="w-4 h-4" />
           {{ isRefreshing ? t('admin.upstream.refresh.refreshing') : t('admin.upstream.refresh.action') }}
         </Button>
-        <Button @click="isAddModalOpen = true" class="w-full sm:w-auto h-10 rounded-xl px-4 gap-2 bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm">
+        <Button @click="isAddModalOpen = true" class="h-10 flex-1 gap-2 px-4 shadow-sm sm:flex-none">
           <Plus class="w-4 h-4" />
           {{ t('admin.upstream.addSite') }}
         </Button>
@@ -634,8 +659,7 @@ onBeforeUnmount(() => {
     <!-- Delete Confirm Modal -->
     <div v-if="deletingSite" class="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div class="absolute inset-0 bg-background/80 backdrop-blur-sm" @click="cancelDeleteSite" />
-      <div class="relative w-full max-w-md overflow-hidden rounded-2xl border border-border/70 bg-card p-6 shadow-2xl">
-        <div class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-red-500 via-warning to-red-500" />
+      <div role="alertdialog" aria-modal="true" :aria-label="t('admin.upstream.delete.title')" class="relative w-full max-w-md overflow-hidden rounded-xl border border-border/70 border-t-2 border-t-destructive bg-card p-6 shadow-2xl">
         <div class="flex items-start gap-4">
           <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-red-500/30 bg-red-500/10 text-red-400">
             <Trash2 class="h-5 w-5" />
@@ -674,20 +698,19 @@ onBeforeUnmount(() => {
         ></div>
 
         <!-- Modal Content -->
-        <div class="relative bg-card border border-border/60 rounded-[2rem] shadow-2xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-          <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-accent to-primary" />
+        <div role="dialog" aria-modal="true" :aria-label="t('admin.upstream.fields.availableGroups')" class="relative max-h-[calc(100dvh-2rem)] w-full max-w-2xl overflow-hidden rounded-xl border border-border/60 border-t-2 border-t-primary bg-card shadow-2xl animate-in fade-in zoom-in-95 duration-200">
 
           <div class="flex items-center justify-between px-6 py-5 border-b border-border/40">
             <h3 class="text-lg font-semibold text-foreground">
               {{ t('admin.upstream.fields.availableGroups') }}
               <span class="text-muted-foreground ml-2 text-sm font-medium">{{ selectedSiteForGroups?.name }}</span>
             </h3>
-            <button @click="closeGroupsModal" class="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md hover:bg-surface-elevated">
+            <button type="button" @click="closeGroupsModal" class="rounded-md p-1 text-muted-foreground transition-colors hover:bg-surface-elevated hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" :aria-label="t('admin.upstream.fields.closeGroupsModal')">
               <X class="w-5 h-5" />
             </button>
           </div>
 
-          <div class="p-6 max-h-[60vh] overflow-y-auto space-y-6">
+          <div class="max-h-[60dvh] space-y-6 overflow-y-auto p-6 overscroll-contain">
             <div v-for="(groups, platform) in groupedGroups" :key="platform" class="space-y-3">
               <h4 class="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
                 <div class="w-1.5 h-1.5 rounded-full bg-primary"></div>
@@ -767,20 +790,19 @@ onBeforeUnmount(() => {
         ></div>
 
         <!-- Modal Content -->
-        <div class="relative bg-card border border-border/60 rounded-[2rem] shadow-2xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-          <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-accent to-primary" />
+        <div role="dialog" aria-modal="true" :aria-label="t(editingSiteId ? 'admin.upstream.modal.editTitle' : 'admin.upstream.modal.title')" class="relative max-h-[calc(100dvh-2rem)] w-full max-w-2xl overflow-y-auto overscroll-contain rounded-xl border border-border/60 border-t-2 border-t-primary bg-card shadow-2xl animate-in fade-in zoom-in-95 duration-200">
 
           <div class="flex items-center justify-between px-6 py-5 border-b border-border/40">
             <h3 class="text-lg font-semibold text-foreground">
               {{ t(editingSiteId ? 'admin.upstream.modal.editTitle' : 'admin.upstream.modal.title') }}
             </h3>
-            <button @click="closeSiteModal" class="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md hover:bg-surface-elevated">
+            <button type="button" @click="closeSiteModal" class="rounded-md p-1 text-muted-foreground transition-colors hover:bg-surface-elevated hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" :aria-label="t('admin.upstream.modal.cancel')">
               <X class="w-5 h-5" />
             </button>
           </div>
 
           <form @submit.prevent="handleAddSite" class="p-6">
-            <div v-if="addErrorKey" class="flex items-start gap-2 rounded-xl border border-warning/20 bg-warning/10 px-3 py-2 text-sm text-warning mb-5">
+            <div v-if="addErrorKey" class="mb-5 flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert" aria-live="polite">
               <AlertCircle class="mt-0.5 h-4 w-4 shrink-0" />
               <span>{{ t(addErrorKey) }}</span>
             </div>
@@ -788,12 +810,14 @@ onBeforeUnmount(() => {
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <!-- Site Name -->
               <div class="space-y-2">
-                <label class="text-sm font-medium text-foreground flex items-center gap-1">
+                <label for="upstream-site-name" class="text-sm font-medium text-foreground flex items-center gap-1">
                   <span class="text-red-500">*</span>
                   {{ t('admin.upstream.modal.form.siteName') }}
                 </label>
                 <Input
+                  id="upstream-site-name"
                   v-model="newSiteForm.name"
+                  name="siteName"
                   :placeholder="t('admin.upstream.modal.form.siteNamePlaceholder')"
                   :disabled="isAdding"
                   required
@@ -803,15 +827,17 @@ onBeforeUnmount(() => {
 
               <!-- Platform Select -->
               <div class="space-y-2">
-                <label class="text-sm font-medium text-foreground flex items-center gap-1">
+                <label for="upstream-site-platform" class="text-sm font-medium text-foreground flex items-center gap-1">
                   <span class="text-red-500">*</span>
                   {{ t('admin.upstream.modal.form.platform') }}
                 </label>
                 <div class="relative">
                   <select
+                    id="upstream-site-platform"
                     v-model="newSiteForm.platform"
+                    name="platform"
                     :disabled="isAdding"
-                    class="w-full h-10 px-3 rounded-xl bg-surface border border-border/50 focus:border-primary focus:ring-1 focus:ring-primary outline-none appearance-none text-sm text-foreground transition-all"
+                    class="h-10 w-full appearance-none rounded-lg border border-border/50 bg-surface px-3 text-sm text-foreground outline-none transition-[color,background-color,border-color,box-shadow] focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/30"
                   >
                     <option value="auto">{{ t('admin.upstream.modal.form.platforms.auto') }}</option>
                     <option value="sub2api">{{ t('admin.upstream.modal.form.platforms.sub2api') }}</option>
@@ -826,12 +852,14 @@ onBeforeUnmount(() => {
 
               <!-- Site URL -->
               <div class="space-y-2 sm:col-span-2">
-                <label class="text-sm font-medium text-foreground flex items-center gap-1">
+                <label for="upstream-site-url" class="text-sm font-medium text-foreground flex items-center gap-1">
                   <span class="text-red-500">*</span>
                   {{ t('admin.upstream.modal.form.siteUrl') }}
                 </label>
                 <Input
+                  id="upstream-site-url"
                   v-model="newSiteForm.siteUrl"
+                  name="siteUrl"
                   type="url"
                   :placeholder="t('admin.upstream.modal.form.siteUrlPlaceholder')"
                   :disabled="isAdding"
@@ -842,11 +870,11 @@ onBeforeUnmount(() => {
 
               <!-- Auth Mode -->
               <div class="space-y-2 sm:col-span-2">
-                <label class="text-sm font-medium text-foreground flex items-center gap-1">
+                <span class="text-sm font-medium text-foreground flex items-center gap-1">
                   <span class="text-red-500">*</span>
                   {{ t('admin.upstream.modal.form.authMode') }}
-                </label>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                </span>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" role="radiogroup" :aria-label="t('admin.upstream.modal.form.authMode')">
                   <label class="flex cursor-pointer items-start gap-3 rounded-xl border border-border/50 bg-surface p-3 text-sm transition-colors hover:border-primary/50">
                     <input v-model="newSiteForm.authMode" type="radio" value="password" :disabled="isAdding" class="mt-1" />
                     <span class="space-y-1">
@@ -855,10 +883,10 @@ onBeforeUnmount(() => {
                     </span>
                   </label>
                   <label class="flex cursor-pointer items-start gap-3 rounded-xl border border-border/50 bg-surface p-3 text-sm transition-colors hover:border-primary/50">
-                    <input v-model="newSiteForm.authMode" type="radio" value="token" :disabled="isAdding" class="mt-1" />
+                    <input v-model="newSiteForm.authMode" type="radio" :value="newSiteForm.platform === 'newapi' ? 'user_key' : 'token'" :disabled="isAdding" class="mt-1" />
                     <span class="space-y-1">
-                      <span class="block font-medium text-foreground">{{ t('admin.upstream.modal.form.authModes.token') }}</span>
-                      <span class="block text-xs leading-5 text-muted-foreground">{{ t('admin.upstream.modal.form.authModes.tokenHelp') }}</span>
+                      <span class="block font-medium text-foreground">{{ t(`admin.upstream.modal.form.authModes.${newSiteForm.platform === 'newapi' ? 'userKey' : 'token'}`) }}</span>
+                      <span class="block text-xs leading-5 text-muted-foreground">{{ t(`admin.upstream.modal.form.authModes.${newSiteForm.platform === 'newapi' ? 'userKeyHelp' : 'tokenHelp'}`) }}</span>
                     </span>
                   </label>
                 </div>
@@ -866,12 +894,14 @@ onBeforeUnmount(() => {
 
               <!-- Account -->
               <div v-if="newSiteForm.authMode === 'password'" class="space-y-2">
-                <label class="text-sm font-medium text-foreground flex items-center gap-1">
+                <label for="upstream-site-account" class="text-sm font-medium text-foreground flex items-center gap-1">
                   <span class="text-red-500">*</span>
                   {{ t('admin.upstream.modal.form.account') }}
                 </label>
                 <Input
+                  id="upstream-site-account"
                   v-model="newSiteForm.account"
+                  name="account"
                   :placeholder="t('admin.upstream.modal.form.accountPlaceholder')"
                   :disabled="isAdding"
                   required
@@ -881,12 +911,14 @@ onBeforeUnmount(() => {
 
               <!-- Password -->
               <div v-if="newSiteForm.authMode === 'password'" class="space-y-2">
-                <label class="text-sm font-medium text-foreground flex items-center gap-1">
+                <label for="upstream-site-password" class="text-sm font-medium text-foreground flex items-center gap-1">
                   <span v-if="!editingSiteId" class="text-red-500">*</span>
                   {{ t('admin.upstream.modal.form.password') }}
                 </label>
                 <Input
+                  id="upstream-site-password"
                   v-model="newSiteForm.password"
+                  name="password"
                   type="password"
                   :placeholder="t(editingSiteId ? 'admin.upstream.modal.form.passwordEditPlaceholder' : 'admin.upstream.modal.form.passwordPlaceholder')"
                   :disabled="isAdding"
@@ -898,35 +930,41 @@ onBeforeUnmount(() => {
                 </p>
               </div>
 
-              <template v-else>
+              <template v-else-if="newSiteForm.authMode === 'token'">
                 <div class="space-y-2 sm:col-span-2">
-                  <label class="text-sm font-medium text-foreground flex items-center gap-1">
+                  <label for="upstream-site-access-token" class="text-sm font-medium text-foreground flex items-center gap-1">
                     {{ t('admin.upstream.modal.form.accessToken') }}
                   </label>
                   <Input
                     v-model="newSiteForm.accessToken"
                     :placeholder="t('admin.upstream.modal.form.accessTokenPlaceholder')"
+                    id="upstream-site-access-token"
+                    name="accessToken"
                     :disabled="isAdding"
                     class="bg-surface border-border/50 focus:border-primary h-10"
                   />
                 </div>
                 <div class="space-y-2">
-                  <label class="text-sm font-medium text-foreground flex items-center gap-1">
+                  <label for="upstream-site-refresh-token" class="text-sm font-medium text-foreground flex items-center gap-1">
                     {{ t('admin.upstream.modal.form.refreshToken') }}
                   </label>
                   <Input
+                    id="upstream-site-refresh-token"
                     v-model="newSiteForm.refreshToken"
+                    name="refreshToken"
                     :placeholder="t('admin.upstream.modal.form.refreshTokenPlaceholder')"
                     :disabled="isAdding"
                     class="bg-surface border-border/50 focus:border-primary h-10"
                   />
                 </div>
                 <div class="space-y-2">
-                  <label class="text-sm font-medium text-foreground flex items-center gap-1">
+                  <label for="upstream-site-token-type" class="text-sm font-medium text-foreground flex items-center gap-1">
                     {{ t('admin.upstream.modal.form.tokenType') }}
                   </label>
                   <Input
+                    id="upstream-site-token-type"
                     v-model="newSiteForm.tokenType"
+                    name="tokenType"
                     :placeholder="t('admin.upstream.modal.form.tokenTypePlaceholder')"
                     :disabled="isAdding"
                     class="bg-surface border-border/50 focus:border-primary h-10"
@@ -937,21 +975,63 @@ onBeforeUnmount(() => {
                 </div>
               </template>
 
+              <template v-else>
+                <div class="space-y-2">
+                  <label for="upstream-site-user-id" class="text-sm font-medium text-foreground flex items-center gap-1">
+                    <span class="text-red-500">*</span>
+                    {{ t('admin.upstream.modal.form.userId') }}
+                  </label>
+                  <Input
+                    id="upstream-site-user-id"
+                    v-model="newSiteForm.userId"
+                    name="userId"
+                    :placeholder="t('admin.upstream.modal.form.userIdPlaceholder')"
+                    :disabled="isAdding"
+                    inputmode="numeric"
+                    autocomplete="off"
+                    required
+                    class="bg-surface border-border/50 focus:border-primary h-10"
+                  />
+                </div>
+                <div class="space-y-2">
+                  <label for="upstream-site-user-key" class="text-sm font-medium text-foreground flex items-center gap-1">
+                    <span class="text-red-500">*</span>
+                    {{ t('admin.upstream.modal.form.userKey') }}
+                  </label>
+                  <Input
+                    id="upstream-site-user-key"
+                    v-model="newSiteForm.accessToken"
+                    name="userKey"
+                    type="password"
+                    :placeholder="t('admin.upstream.modal.form.userKeyPlaceholder')"
+                    :disabled="isAdding"
+                    autocomplete="off"
+                    required
+                    class="bg-surface border-border/50 focus:border-primary h-10"
+                  />
+                  <p class="text-xs leading-5 text-muted-foreground">
+                    {{ t('admin.upstream.modal.form.userKeyHelp') }}
+                  </p>
+                </div>
+              </template>
+
               <!-- Recharge Rate -->
               <div class="space-y-2">
-                <label class="text-sm font-medium text-foreground flex items-center gap-1">
+                <label for="upstream-site-recharge-rate" class="text-sm font-medium text-foreground flex items-center gap-1">
                   <span class="text-red-500">*</span>
                   {{ t('admin.upstream.modal.form.rechargeRate') }}
                 </label>
                 <input
+                  id="upstream-site-recharge-rate"
                   v-model.number="newSiteForm.rechargeRate"
+                  name="rechargeRate"
                   type="number"
                   min="0.000001"
                   step="0.000001"
                   :placeholder="t('admin.upstream.modal.form.rechargeRatePlaceholder')"
                   :disabled="isAdding"
                   required
-                  class="w-full h-10 px-3 rounded-xl bg-surface border border-border/50 focus:border-primary focus:ring-1 focus:ring-primary outline-none text-sm text-foreground placeholder:text-muted-foreground transition-all disabled:cursor-not-allowed disabled:opacity-50"
+                  class="h-10 w-full rounded-lg border border-border/50 bg-surface px-3 text-sm text-foreground outline-none transition-[color,background-color,border-color,box-shadow] placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
                 />
                 <p class="text-xs text-muted-foreground">
                   {{ t('admin.upstream.modal.form.rechargeRateHelp') }}
@@ -960,11 +1040,13 @@ onBeforeUnmount(() => {
 
               <!-- Remark -->
               <div class="space-y-2">
-                <label class="text-sm font-medium text-foreground ml-2.5">
+                <label for="upstream-site-remark" class="ml-2.5 text-sm font-medium text-foreground">
                   {{ t('admin.upstream.modal.form.remark') }}
                 </label>
                 <Input
+                  id="upstream-site-remark"
                   v-model="newSiteForm.remark"
+                  name="remark"
                   :placeholder="t('admin.upstream.modal.form.remarkPlaceholder')"
                   :disabled="isAdding"
                   class="bg-surface border-border/50 focus:border-primary h-10"
@@ -974,7 +1056,7 @@ onBeforeUnmount(() => {
 
             <!-- Actions -->
             <div class="flex items-center justify-end gap-3 pt-4 border-t border-border/40 mt-6">
-              <Button type="button" variant="ghost" :disabled="isAdding" @click="isAddModalOpen = false" class="hover:bg-surface-line">
+              <Button type="button" variant="ghost" :disabled="isAdding" @click="closeSiteModal" class="hover:bg-surface-line">
                 {{ t('admin.upstream.modal.cancel') }}
               </Button>
               <Button type="submit" :disabled="isAdding" class="bg-primary text-primary-foreground hover:bg-primary/90">

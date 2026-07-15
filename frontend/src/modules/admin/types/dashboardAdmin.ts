@@ -2,8 +2,10 @@
 
 export type DashboardAdminPlatform = 'sub2api' | 'newapi'
 
-/** sub2api 的两种登录方式（API Key 方式已弃用，无法通过 /api/v1/auth/me 校验）。 */
-export type Sub2apiAuthMethod = 'password' | 'token'
+export type DashboardAdminAuthMethod = 'password' | 'token' | 'admin_key'
+
+/** 保留旧类型名，避免影响现有调用方。 */
+export type Sub2apiAuthMethod = DashboardAdminAuthMethod
 
 /** 后端返回的 admin 登录状态，用于决定是否弹窗与展示凭证过期时间。 */
 export interface DashboardAdminStatus {
@@ -26,4 +28,6 @@ export interface DashboardAdminLoginForm {
   accessToken?: string
   refreshToken?: string
   tokenType?: string
+  adminKey?: string
+  userId?: string
 }

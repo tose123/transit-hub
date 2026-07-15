@@ -124,7 +124,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="h-[calc(100vh-8rem)] flex flex-col space-y-6">
+  <div class="flex min-h-[calc(100dvh-8rem)] flex-col space-y-6 lg:h-[calc(100dvh-8rem)]">
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
       <div class="flex items-center gap-3 w-full sm:w-auto flex-1">
         <div class="relative w-full sm:w-48">

@@ -25,6 +25,7 @@ const { t } = useI18n()
       <div
         role="alertdialog"
         aria-modal="true"
+        aria-labelledby="admin-logout-confirm-title"
         class="relative w-full max-w-sm overflow-hidden rounded-[1.75rem] border border-border/60 bg-card text-card-foreground shadow-2xl shadow-primary/10 animate-in fade-in zoom-in-95 duration-200"
       >
         <div class="flex flex-col items-center gap-4 px-6 py-7 text-center">
@@ -32,7 +33,7 @@ const { t } = useI18n()
             <AlertTriangle class="h-6 w-6" />
           </div>
           <div class="space-y-1.5">
-            <h2 class="text-lg font-semibold text-foreground">{{ t('admin.dashboard.adminAuth.logoutConfirm.title') }}</h2>
+            <h2 id="admin-logout-confirm-title" class="text-lg font-semibold text-foreground">{{ t('admin.dashboard.adminAuth.logoutConfirm.title') }}</h2>
             <p class="text-sm text-muted-foreground">{{ t('admin.dashboard.adminAuth.logoutConfirm.description') }}</p>
           </div>
 

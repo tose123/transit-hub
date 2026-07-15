@@ -61,6 +61,7 @@ type AuthMode string
 const (
 	AuthModePassword AuthMode = "password"
 	AuthModeToken    AuthMode = "token"
+	AuthModeUserKey  AuthMode = "user_key"
 )
 
 type MetricValue struct {
@@ -117,6 +118,7 @@ type CreateRequest struct {
 	AccessToken  string   `json:"accessToken"`
 	RefreshToken string   `json:"refreshToken"`
 	TokenType    string   `json:"tokenType"`
+	UserID       string   `json:"userId"`
 	Remark       string   `json:"remark"`
 	RechargeRate float64  `json:"rechargeRate"`
 }
@@ -131,6 +133,7 @@ type UpdateRequest struct {
 	AccessToken  string   `json:"accessToken"`
 	RefreshToken string   `json:"refreshToken"`
 	TokenType    string   `json:"tokenType"`
+	UserID       string   `json:"userId"`
 	Remark       string   `json:"remark"`
 	RechargeRate float64  `json:"rechargeRate"`
 }
@@ -178,11 +181,14 @@ type Response struct {
 }
 
 type Session struct {
-	Platform     Platform
-	BaseURL      string
-	Cookie       string
-	UserID       string
-	AccessToken  string
+	Platform    Platform
+	BaseURL     string
+	Cookie      string
+	UserID      string
+	AccessToken string
+	// AdminAPIKey 是 Sub2API 管理路由使用的 Admin API Key，通过 x-api-key 发送。
+	// 它与用户 JWT/AccessToken 分开保存，避免被误发到普通用户路由。
+	AdminAPIKey  string `json:",omitempty"`
 	RefreshToken string
 	TokenType    string
 	// ExpiresAt 是 access token 过期的毫秒时间戳，来自登录/刷新响应的 expires_in。
@@ -194,15 +200,18 @@ type Session struct {
 }
 
 // IsAuthenticated 按平台判断会话是否有效（已持有登录凭证）。
-// sub2api 需要 AccessToken，new-api 需要 Cookie + UserID。
+// sub2api 支持用户 AccessToken 或 Admin API Key；new-api 需要 UserID，
+// 并支持 Cookie 会话或“个人设置 -> 系统访问令牌”生成的 Access Token。
 func (s Session) IsAuthenticated() bool {
 	switch s.Platform {
 	case PlatformNewAPI:
-		return strings.TrimSpace(s.Cookie) != "" && strings.TrimSpace(s.UserID) != ""
+		return strings.TrimSpace(s.UserID) != "" &&
+			(strings.TrimSpace(s.Cookie) != "" || strings.TrimSpace(s.AccessToken) != "")
 	case PlatformSub2API:
-		return strings.TrimSpace(s.AccessToken) != ""
+		return strings.TrimSpace(s.AccessToken) != "" || strings.TrimSpace(s.AdminAPIKey) != ""
 	default:
-		return strings.TrimSpace(s.AccessToken) != "" || (strings.TrimSpace(s.Cookie) != "" && strings.TrimSpace(s.UserID) != "")
+		return strings.TrimSpace(s.AccessToken) != "" || strings.TrimSpace(s.AdminAPIKey) != "" ||
+			(strings.TrimSpace(s.Cookie) != "" && strings.TrimSpace(s.UserID) != "")
 	}
 }
 

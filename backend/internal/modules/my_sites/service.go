@@ -1108,11 +1108,10 @@ func (s *Service) validatedState(ctx context.Context, state *State) (*State, err
 // dashboard 登录成功后调用此方法，将 admin session 同步到 my_site_states 表，
 // 使 RealConnect 等依赖 my_site_states 的功能可以使用 admin 会话。
 // 保留已有的 mappings 和 own_groups，仅更新 session 和身份信息。
-func (s *Service) SyncAdminSession(ctx context.Context, userID string, adminAccountID string, session upstream.Session, identity string) {
+func (s *Service) SyncAdminSession(ctx context.Context, userID string, adminAccountID string, session upstream.Session, identity string) error {
 	existing, err := s.repository.Get(ctx, userID, adminAccountID)
 	if err != nil {
-		log.Printf("[my-sites] sync admin session: read failed user_id=%s err=%v", userID, err)
-		return
+		return err
 	}
 	if existing == nil {
 		existing = &State{
@@ -1125,9 +1124,21 @@ func (s *Service) SyncAdminSession(ctx context.Context, userID string, adminAcco
 	existing.BaseURL = session.BaseURL
 	existing.Email = identity
 	existing.Session = session
-	if err := s.repository.Save(ctx, *existing); err != nil {
-		log.Printf("[my-sites] sync admin session: save failed user_id=%s err=%v", userID, err)
+	return s.repository.Save(ctx, *existing)
+}
+
+// StoredSession reads the persisted credential without refreshing or contacting
+// the upstream site. Dashboard reconciliation uses it to avoid overwriting a
+// newer PostgreSQL session merely because an upstream request failed transiently.
+func (s *Service) StoredSession(ctx context.Context, userID string, adminAccountID string) (upstream.Session, bool, error) {
+	state, err := s.repository.Get(ctx, userID, adminAccountID)
+	if err != nil {
+		return upstream.Session{}, false, err
 	}
+	if state == nil || !state.Session.IsAuthenticated() {
+		return upstream.Session{}, false, nil
+	}
+	return state.Session, true, nil
 }
 
 func (s *Service) currentAdminAccountID(ctx context.Context, userID string) (string, error) {

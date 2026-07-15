@@ -66,7 +66,7 @@ onMounted(() => {
   <div class="flex flex-col w-full overflow-hidden">
 
     <!-- Hero Section -->
-    <section class="relative flex min-h-screen items-center justify-center pt-20">
+    <section class="relative flex min-h-dvh items-center justify-center pt-20">
       <!-- Background Abstract Elements -->
       <div class="absolute inset-0 -z-10 overflow-hidden">
         <div class="absolute top-1/4 left-1/4 h-[500px] w-[500px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary/20 blur-[120px]" />

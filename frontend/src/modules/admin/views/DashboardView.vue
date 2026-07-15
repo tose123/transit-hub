@@ -19,7 +19,7 @@ import { computeDelta, formatCny, formatDateTime } from '../utils/dashboard'
 import type { DashboardMetricKey, DashboardPeriod } from '../types/dashboard'
 import type { DashboardAdminPlatform, Sub2apiAuthMethod } from '../types/dashboardAdmin'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const router = useRouter()
 const { metrics, loading: metricsLoading, error: metricsError, fetchMetrics, applyRawData } = useDashboardMetrics()
 
@@ -166,7 +166,7 @@ const loadAllData = async () => {
 
 // 顶部状态条在邮箱后展示登录凭证的过期时间（临期自动刷新）；取不到时显示「未知」。
 const adminExpiry = computed(
-  () => formatDateTime(adminStatus.value.expiresAt) ?? t('admin.dashboard.adminAuth.timeUnknown'),
+  () => formatDateTime(adminStatus.value.expiresAt, locale.value) ?? t('admin.dashboard.adminAuth.timeUnknown'),
 )
 
 onMounted(() => {
@@ -300,7 +300,7 @@ const charts = computed(() =>
 
     <!-- 核心指标卡片 -->
     <template v-else-if="metrics.length > 0">
-    <section class="grid gap-6 md:grid-cols-2 xl:grid-cols-6">
+    <section class="grid gap-4 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
       <StatCard
         v-for="card in cards"
         :key="card.key"
@@ -343,6 +343,7 @@ const charts = computed(() =>
             v-for="item in periods"
             :key="item"
             type="button"
+            :aria-pressed="period === item"
             class="px-4 py-1.5 text-sm font-medium rounded-lg transition-colors"
             :class="period === item
               ? 'bg-primary text-primary-foreground shadow-sm'

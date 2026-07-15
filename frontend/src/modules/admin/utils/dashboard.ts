@@ -41,20 +41,17 @@ export function formatCny(value: number | null | undefined): string {
   return `¥${cnyFormatter.format(value)}`
 }
 
-// 固定使用 zh-CN 的「年-月-日 时:分」格式，与语言无关，保证两种界面语言下时间显示一致。
-const dateTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  hour12: false,
-})
-
 /** 把毫秒时间戳格式化为可读时间；空值或非数字返回 null，由调用方回退「未知」文案。 */
-export function formatDateTime(ms: number | null | undefined): string | null {
+export function formatDateTime(ms: number | null | undefined, locale = 'zh-CN'): string | null {
   if (ms == null || !Number.isFinite(ms)) return null
-  return dateTimeFormatter.format(new Date(ms))
+  return new Intl.DateTimeFormat(locale, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date(ms))
 }
 
 export interface DeltaResult {

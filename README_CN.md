@@ -185,6 +185,8 @@ REDIS_URL=redis://127.0.0.1:6379/0
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=transithub
 ALLOW_PUBLIC_REGISTER=true
+# 仅限本地抽奖联调；线上必须保持 false 或不设置
+LOTTERY_ALLOW_PRIVATE_SUB2API_TARGETS=false
 ```
 
 ### 前端

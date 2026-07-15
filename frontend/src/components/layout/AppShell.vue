@@ -36,7 +36,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="min-h-screen text-foreground flex flex-col selection:bg-primary/30">
+  <div class="flex min-h-dvh flex-col text-foreground selection:bg-primary/30">
     <header ref="headerRef" class="fixed top-0 left-0 right-0 z-50 border-b border-border/40 bg-background/60 backdrop-blur-xl">
       <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <div class="flex items-center gap-2">

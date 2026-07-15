@@ -263,7 +263,10 @@ const parseNumberInput = (value: string): number | null => {
         >
           <div
             v-if="open"
-            class="absolute right-0 top-0 bottom-0 w-full max-w-md overflow-y-auto border-l border-border/60 bg-card shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            :aria-label="mapping?.ownGroup ? t(`${prefix}.titleWithGroup`, { group: mapping.ownGroup }) : t(`${prefix}.title`)"
+            class="absolute bottom-0 right-0 top-0 w-full max-w-md overflow-y-auto overscroll-contain border-l border-border/60 bg-card shadow-2xl"
           >
             <!-- Header -->
             <div class="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-border/60 bg-card/95 backdrop-blur px-5 py-4">

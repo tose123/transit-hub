@@ -185,6 +185,8 @@ REDIS_URL=redis://127.0.0.1:6379/0
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=transithub
 ALLOW_PUBLIC_REGISTER=true
+# Local lottery debugging only; keep false or unset in production
+LOTTERY_ALLOW_PRIVATE_SUB2API_TARGETS=false
 ```
 
 ### Frontend

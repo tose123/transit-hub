@@ -1,14 +1,26 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useDark, useToggle } from '@vueuse/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useI18n } from 'vue-i18n'
-import { Mail, KeyRound } from 'lucide-vue-next'
+import { Globe, KeyRound, Mail, Moon, Sun } from 'lucide-vue-next'
 import { loginWithEmail, storeAccessToken } from './api/auth'
+import logoUrl from '@/assets/logo.png'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const router = useRouter()
+const isDark = useDark({
+  selector: 'html',
+  attribute: 'class',
+  valueDark: 'dark',
+  valueLight: '',
+})
+const toggleDark = useToggle(isDark)
+const toggleLocale = () => {
+  locale.value = locale.value === 'zh-CN' ? 'en-US' : 'zh-CN'
+}
 
 const email = ref('')
 const password = ref('')
@@ -58,7 +70,7 @@ const handleLogin = async () => {
 
         <form @submit.prevent="handleLogin" class="space-y-5">
           <div class="space-y-2">
-            <label class="text-sm font-medium text-foreground">{{ t('auth.login.email') }}</label>
+            <label for="login-email" class="text-sm font-medium text-foreground">{{ t('auth.login.email') }}</label>
             <div class="relative">
               <Mail class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
@@ -67,6 +79,7 @@ const handleLogin = async () => {
                 :placeholder="t('auth.login.emailPlaceholder')"
                 class="pl-10 h-12 bg-surface border-border/50 focus:border-primary"
                 autocomplete="email"
+                spellcheck="false"
                 :disabled="isLoading"
                 required
               />
@@ -74,7 +87,7 @@ const handleLogin = async () => {
           </div>
 
           <div class="space-y-2">
-            <label class="text-sm font-medium text-foreground">{{ t('auth.login.password') }}</label>
+            <label for="login-password" class="text-sm font-medium text-foreground">{{ t('auth.login.password') }}</label>
             <div class="relative">
               <KeyRound class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
@@ -91,14 +104,17 @@ const handleLogin = async () => {
 
           <p
             v-if="statusKey"
-            class="rounded-xl border border-signal/20 bg-signal/10 px-4 py-3 text-sm font-medium text-signal"
+            class="rounded-lg border border-signal/20 bg-signal/10 px-4 py-3 text-sm font-medium text-signal"
+            role="status"
+            aria-live="polite"
           >
             {{ t(statusKey) }}
           </p>
 
           <p
             v-if="errorKey"
-            class="rounded-xl border border-warning/20 bg-warning/10 px-4 py-3 text-sm font-medium text-warning"
+            class="rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive"
+            role="alert"
           >
             {{ t(errorKey) }}
           </p>
@@ -113,5 +129,5 @@ const handleLogin = async () => {
         </form>
       </div>
     </div>
-  </div>
+  </main>
 </template>

@@ -668,7 +668,7 @@ onBeforeUnmount(() => {
     </section>
 
     <div v-if="confirmOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-3 backdrop-blur-sm" role="dialog" aria-modal="true" :aria-labelledby="'mass-email-confirm-title'">
-      <div class="flex max-h-[calc(100vh-2rem)] w-full max-w-xl flex-col rounded-lg border border-border/60 bg-card shadow-xl">
+      <div class="flex max-h-[calc(100dvh-2rem)] w-full max-w-xl flex-col rounded-lg border border-border/60 bg-card shadow-xl">
         <div class="flex shrink-0 items-start justify-between gap-4 border-b border-border/50 p-4">
           <div class="min-w-0">
             <h2 id="mass-email-confirm-title" class="truncate text-lg font-semibold text-foreground">{{ t(confirmTitleKey) }}</h2>
@@ -712,7 +712,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="isPreviewOpen" class="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 p-3 backdrop-blur-sm" role="dialog" aria-modal="true" :aria-labelledby="'mass-email-preview-title'">
-      <div class="flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col rounded-lg border border-border/60 bg-card shadow-xl">
+      <div class="flex max-h-[calc(100dvh-2rem)] w-full max-w-4xl flex-col rounded-lg border border-border/60 bg-card shadow-xl">
         <div class="flex shrink-0 items-start justify-between gap-4 border-b border-border/50 p-4">
           <div class="min-w-0">
             <h2 id="mass-email-preview-title" class="truncate text-lg font-semibold text-foreground">{{ t('admin.massEmail.preview.title') }}</h2>
@@ -729,7 +729,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="isBatchListOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-3 backdrop-blur-sm" role="dialog" aria-modal="true" :aria-labelledby="'mass-email-batches-title'">
-      <div class="flex max-h-[calc(100vh-2rem)] w-full max-w-3xl flex-col rounded-lg border border-border/60 bg-card shadow-xl">
+      <div class="flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col rounded-lg border border-border/60 bg-card shadow-xl">
         <div class="flex shrink-0 items-center justify-between gap-4 border-b border-border/50 p-4">
           <h2 id="mass-email-batches-title" class="text-lg font-semibold text-foreground">{{ t('admin.massEmail.batches.title') }}</h2>
           <button type="button" class="rounded-lg p-2 text-muted-foreground outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-primary" :aria-label="t('admin.massEmail.batches.close')" @click="closeBatchList">
@@ -766,7 +766,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="isBatchDetailOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-3 backdrop-blur-sm" role="dialog" aria-modal="true" :aria-labelledby="'mass-email-detail-title'">
-      <div class="flex max-h-[calc(100vh-2rem)] w-full max-w-3xl flex-col rounded-lg border border-border/60 bg-card shadow-xl">
+      <div class="flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col rounded-lg border border-border/60 bg-card shadow-xl">
         <div class="flex shrink-0 items-center justify-between gap-4 border-b border-border/50 p-4">
           <h2 id="mass-email-detail-title" class="text-lg font-semibold text-foreground">{{ t('admin.massEmail.detail.title') }}</h2>
           <div class="flex items-center gap-2">
