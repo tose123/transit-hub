@@ -487,7 +487,7 @@ onBeforeUnmount(() => {
 
 <template>
   <main
-    class="min-h-screen bg-background px-3 py-3 text-foreground sm:px-5 sm:py-5"
+    class="min-h-dvh bg-background px-3 py-3 text-foreground sm:px-5 sm:py-5"
     :inert="drawReveal.isVisible.value"
     :aria-hidden="drawReveal.isVisible.value ? 'true' : undefined"
   >
@@ -542,8 +542,8 @@ onBeforeUnmount(() => {
           {{ t(listErrorKey) }}
         </div>
 
-        <div class="min-h-[calc(100vh-11rem)] gap-4" :class="focusMode ? 'block' : 'grid lg:grid-cols-[20rem_minmax(0,1fr)]'">
-          <aside v-if="!focusMode" class="min-w-0 rounded-lg border border-border/70 bg-surface p-3 lg:max-h-[calc(100vh-11rem)] lg:overflow-auto">
+        <div class="min-h-[calc(100dvh-11rem)] gap-4" :class="focusMode ? 'block' : 'grid lg:grid-cols-[20rem_minmax(0,1fr)]'">
+          <aside v-if="!focusMode" class="min-w-0 rounded-lg border border-border/70 bg-surface p-3 lg:max-h-[calc(100dvh-11rem)] lg:overflow-auto">
             <div class="mb-3 flex items-center justify-between gap-2">
               <h2 class="flex items-center gap-2 text-sm font-semibold">
                 <Ticket class="h-4 w-4 text-primary" aria-hidden="true" />
@@ -804,7 +804,7 @@ onBeforeUnmount(() => {
     <div
       v-if="drawReveal.isVisible.value"
       :ref="drawReveal.overlayRef"
-      class="fixed inset-0 z-[100] grid min-h-screen place-items-center overflow-hidden bg-background/95 px-4 py-6 text-foreground"
+      class="fixed inset-0 z-[100] grid min-h-dvh place-items-center overflow-hidden bg-background/95 px-4 py-6 text-foreground"
       role="dialog"
       aria-modal="true"
       :aria-label="t('embed.lottery.drawReveal.ariaLabel')"

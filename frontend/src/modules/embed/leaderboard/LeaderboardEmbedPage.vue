@@ -84,7 +84,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <main class="min-h-screen w-full bg-background px-3 py-4 text-foreground sm:px-5 sm:py-6 lg:px-8">
+  <main class="min-h-dvh w-full bg-background px-3 py-4 text-foreground sm:px-5 sm:py-6 lg:px-8">
     <LeaderboardBoard
       :rows="rows"
       :loading="loading"

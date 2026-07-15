@@ -71,7 +71,7 @@ const stepKeys = [
           aria-modal="true"
           :aria-labelledby="titleId"
           :aria-describedby="descriptionId"
-          class="relative flex h-[min(680px,calc(100vh-2rem))] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border/60 bg-card shadow-2xl"
+        class="relative flex h-[min(680px,calc(100dvh-2rem))] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border/60 bg-card shadow-2xl"
         >
           <div class="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 px-5 py-4">
             <div class="flex min-w-0 items-center gap-2.5">

@@ -51,13 +51,13 @@ func (s *PlatformService) ListAdminGroupAccounts(session Session, group AdminGro
 // listSub2APIGroupAccounts 分页拉取 sub2api 某分组下的账号。
 // 注意 query 参数是 group=<分组ID>（不是 group_id）。逐页拉取直到没有下一页或达到 total。
 func (s *PlatformService) listSub2APIGroupAccounts(session Session, group AdminGroupInfo) ([]AdminGroupAccountInfo, error) {
-	if session.Platform != PlatformSub2API || strings.TrimSpace(session.AccessToken) == "" {
+	if session.Platform != PlatformSub2API || !session.IsAuthenticated() {
 		return nil, newRequestError(ErrorAuth, PlatformSub2API)
 	}
 	if strings.TrimSpace(group.ID) == "" {
 		return []AdminGroupAccountInfo{}, nil
 	}
-	authOptions := requestOptions{AccessToken: session.AccessToken, TokenType: session.TokenType}
+	authOptions := adminAuthOptions(session)
 
 	const pageSize = 100
 	const maxPages = 100 // 安全上限，防止上游分页字段异常导致死循环
@@ -118,7 +118,7 @@ func parseSub2APIAccount(record map[string]any) AdminGroupAccountInfo {
 // 优先使用 /api/channel/search?group=<分组名>（server 端已按分组过滤，兼容较老部署也普遍支持）；
 // search 失败时兜底 /api/channel/ 分页拉取后在本地按「逗号分组精确匹配」过滤。
 func (s *PlatformService) listNewAPIGroupChannels(session Session, group AdminGroupInfo) ([]AdminGroupAccountInfo, error) {
-	if session.Platform != PlatformNewAPI || strings.TrimSpace(session.Cookie) == "" {
+	if session.Platform != PlatformNewAPI || !session.IsAuthenticated() {
 		return nil, newRequestError(ErrorAuth, PlatformNewAPI)
 	}
 	groupName := strings.TrimSpace(group.Name)
@@ -136,7 +136,7 @@ func (s *PlatformService) listNewAPIGroupChannels(session Session, group AdminGr
 
 // searchNewAPIGroupChannels 通过 /api/channel/search?group= 分页读取指定分组的 channel。
 func (s *PlatformService) searchNewAPIGroupChannels(session Session, groupName string) ([]AdminGroupAccountInfo, error) {
-	cookieOptions := requestOptions{Cookie: session.Cookie, UserID: session.UserID}
+	cookieOptions := newAPIAuthOptions(session)
 	const pageSize = 100
 	const maxPages = 100
 	channels := make([]AdminGroupAccountInfo, 0)
@@ -173,7 +173,7 @@ func (s *PlatformService) searchNewAPIGroupChannels(session Session, groupName s
 // 再在本地按「逗号分组精确匹配」过滤出属于 groupName 的 channel。
 // 精确匹配：channel.group 按逗号拆分后逐段 TrimSpace 比较，避免 "vip" 命中 "vip2"（substring）。
 func (s *PlatformService) listNewAPIChannelsWithLocalFilter(session Session, groupName string) ([]AdminGroupAccountInfo, error) {
-	cookieOptions := requestOptions{Cookie: session.Cookie, UserID: session.UserID}
+	cookieOptions := newAPIAuthOptions(session)
 	const pageSize = 100
 	const maxPages = 100
 	channels := make([]AdminGroupAccountInfo, 0)

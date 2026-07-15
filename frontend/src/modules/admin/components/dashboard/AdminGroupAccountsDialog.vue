@@ -97,7 +97,7 @@ const assignedPolicyLabel = (account: AdminGroupAccount): string => {
       <div v-if="open && group" class="fixed inset-0 z-[130] flex items-center justify-center p-4">
         <div class="absolute inset-0 bg-background/60 backdrop-blur-sm" @click="emit('close')" />
 
-        <div class="relative flex h-[min(720px,calc(100vh-2rem))] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border/60 bg-card shadow-2xl">
+      <div role="dialog" aria-modal="true" :aria-label="group.name" class="relative flex h-[min(720px,calc(100dvh-2rem))] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border/60 bg-card shadow-2xl">
           <!-- 头部：分组上下文 -->
           <div class="flex shrink-0 items-start justify-between gap-3 border-b border-border/60 px-5 py-4">
             <div class="flex min-w-0 items-center gap-2.5">

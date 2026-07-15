@@ -22,6 +22,7 @@ type requestOptions struct {
 	UserID      string
 	AccessToken string
 	TokenType   string
+	AdminAPIKey string
 }
 
 type jsonResponse struct {
@@ -59,6 +60,9 @@ func (c *HTTPClient) requestJSON(reqURL string, options requestOptions) (jsonRes
 		}
 		req.Header.Set("Authorization", tokenType+" "+options.AccessToken)
 	}
+	if options.AdminAPIKey != "" {
+		req.Header.Set("x-api-key", options.AdminAPIKey)
+	}
 
 	req.Header.Set("User-Agent", BrowserUserAgent)
 	if options.Cookie != "" {
@@ -88,6 +92,14 @@ func (c *HTTPClient) requestJSON(reqURL string, options requestOptions) (jsonRes
 			return jsonResponse{}, newRequestErrorWithStatus(ErrorAuth, "", response.StatusCode)
 		}
 		return jsonResponse{}, newRequestErrorWithStatus(ErrorRequest, "", response.StatusCode)
+	}
+	// new-api commonly reports authentication/authorization failures as HTTP 200
+	// with {"success": false}. Treat that envelope as an error so Root/Admin
+	// writes cannot be mistaken for successful no-op operations.
+	if record, ok := payload.(map[string]any); ok {
+		if success, exists := record["success"].(bool); exists && !success {
+			return jsonResponse{}, newRequestError(ErrorRequest, "")
+		}
 	}
 	return jsonResponse{Payload: payload, Header: response.Header}, nil
 }

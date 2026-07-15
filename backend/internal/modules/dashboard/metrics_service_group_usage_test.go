@@ -50,7 +50,8 @@ func (f *fakeSessionStore) ActiveSessions(ctx context.Context) ([]ActiveSessionR
 
 // fakeAdminAccounts 是 AdminAccountService 的内存实现，按 userID 返回固定的当前工作区。
 type fakeAdminAccounts struct {
-	current map[string]string // userID -> adminAccountID
+	current     map[string]string // userID -> adminAccountID
+	upsertInput admin_accounts.UpsertInput
 }
 
 func (f *fakeAdminAccounts) RequireCurrentID(ctx context.Context, userID string) (string, error) {
@@ -62,7 +63,12 @@ func (f *fakeAdminAccounts) RequireCurrentID(ctx context.Context, userID string)
 }
 
 func (f *fakeAdminAccounts) UpsertAndSwitch(ctx context.Context, userID string, input admin_accounts.UpsertInput) (admin_accounts.Account, error) {
-	return admin_accounts.Account{}, errors.New("not implemented")
+	f.upsertInput = input
+	id := f.current[userID]
+	if id == "" {
+		id = "account-1"
+	}
+	return admin_accounts.Account{ID: id, UserID: userID, Platform: input.Platform, BaseURL: input.BaseURL, Identity: input.Identity, AuthMethod: input.AuthMethod}, nil
 }
 
 // fakePlatformClient 是 PlatformClient 的桩实现，只有测试用到的方法有真实行为，
@@ -79,11 +85,29 @@ type fakePlatformClient struct {
 	// refreshSessionErr / refreshSessionResult 供 RefreshAdminSession 测试控制 RefreshSession 的行为。
 	refreshSessionErr    error
 	refreshSessionResult *upstream.Session
+	adminKeyResult       *upstream.Session
+	adminKeyErr          error
+	capturedAdminKey     string
+	capturedUserID       string
+	capturedPlatform     upstream.Platform
 }
 
 func (f *fakePlatformClient) NormalizeURL(value string) (string, error) { return value, nil }
 
 func (f *fakePlatformClient) LoginAdmin(baseURL string, platform upstream.Platform, account string, password string) (upstream.Session, error) {
+	return upstream.Session{}, errors.New("not implemented")
+}
+
+func (f *fakePlatformClient) LoginAdminWithKey(baseURL string, platform upstream.Platform, key string, userID string) (upstream.Session, error) {
+	f.capturedAdminKey = key
+	f.capturedUserID = userID
+	f.capturedPlatform = platform
+	if f.adminKeyErr != nil {
+		return upstream.Session{}, f.adminKeyErr
+	}
+	if f.adminKeyResult != nil {
+		return *f.adminKeyResult, nil
+	}
 	return upstream.Session{}, errors.New("not implemented")
 }
 

@@ -1,14 +1,26 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useDark, useToggle } from '@vueuse/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useI18n } from 'vue-i18n'
-import { Mail, KeyRound } from 'lucide-vue-next'
+import { Globe, KeyRound, Mail, Moon, Sun } from 'lucide-vue-next'
 import { loginWithEmail, storeAccessToken } from './api/auth'
+import logoUrl from '@/assets/logo.png'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const router = useRouter()
+const isDark = useDark({
+  selector: 'html',
+  attribute: 'class',
+  valueDark: 'dark',
+  valueLight: '',
+})
+const toggleDark = useToggle(isDark)
+const toggleLocale = () => {
+  locale.value = locale.value === 'zh-CN' ? 'en-US' : 'zh-CN'
+}
 
 const email = ref('')
 const password = ref('')
@@ -38,35 +50,50 @@ const handleLogin = async () => {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-background p-4 relative overflow-hidden">
-    <!-- Background abstract -->
-    <div class="absolute inset-0 -z-10 overflow-hidden">
-      <div class="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-primary/10 blur-[100px] rounded-full" />
-    </div>
-
-    <div class="w-full max-w-md">
-      <div class="bg-surface-elevated border border-border/50 rounded-[2rem] p-8 shadow-2xl backdrop-blur-xl relative overflow-hidden">
-        <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-accent to-primary" />
-        
-        <div class="text-center mb-8">
-          <div class="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 border border-primary/20 mb-4">
-            <span class="text-2xl font-black text-primary leading-none">T</span>
-          </div>
-          <h2 class="text-2xl font-bold tracking-tight text-foreground">{{ t('auth.login.title') }}</h2>
+  <main class="flex min-h-dvh items-center justify-center bg-background p-4 sm:p-6">
+    <div class="w-full max-w-sm">
+      <div class="relative overflow-hidden rounded-xl border border-border/70 border-t-2 border-t-primary bg-surface-elevated p-6 shadow-xl shadow-black/10 sm:p-7">
+        <div class="mb-1 flex justify-end gap-1">
+          <button
+            type="button"
+            class="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-surface-line hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            :title="t('admin.layout.toggleLanguage')"
+            :aria-label="t('admin.layout.toggleLanguage')"
+            @click="toggleLocale"
+          >
+            <Globe class="h-4 w-4" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            class="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-surface-line hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            :title="t('admin.layout.toggleTheme')"
+            :aria-label="t('admin.layout.toggleTheme')"
+            @click="toggleDark()"
+          >
+            <Moon v-if="!isDark" class="h-4 w-4" aria-hidden="true" />
+            <Sun v-else class="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+        <div class="mb-7 text-center">
+          <img :src="logoUrl" :alt="t('brand.logoAlt')" width="48" height="48" class="mx-auto mb-4 h-12 w-12 object-contain" />
+          <h1 class="text-balance text-2xl font-semibold text-foreground">{{ t('auth.login.title') }}</h1>
           <p class="text-sm text-muted-foreground mt-2">{{ t('auth.login.subtitle') }}</p>
         </div>
 
         <form @submit.prevent="handleLogin" class="space-y-5">
           <div class="space-y-2">
-            <label class="text-sm font-medium text-foreground">{{ t('auth.login.email') }}</label>
+            <label for="login-email" class="text-sm font-medium text-foreground">{{ t('auth.login.email') }}</label>
             <div class="relative">
-              <Mail class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input 
+              <Mail class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+              <Input
+                id="login-email"
                 v-model="email"
-                type="email" 
+                name="email"
+                type="email"
                 :placeholder="t('auth.login.emailPlaceholder')" 
                 class="pl-10 h-12 bg-surface border-border/50 focus:border-primary"
                 autocomplete="email"
+                spellcheck="false"
                 :disabled="isLoading"
                 required
               />
@@ -74,11 +101,13 @@ const handleLogin = async () => {
           </div>
 
           <div class="space-y-2">
-            <label class="text-sm font-medium text-foreground">{{ t('auth.login.password') }}</label>
+            <label for="login-password" class="text-sm font-medium text-foreground">{{ t('auth.login.password') }}</label>
             <div class="relative">
-              <KeyRound class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input 
+              <KeyRound class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+              <Input
+                id="login-password"
                 v-model="password"
+                name="password"
                 type="password" 
                 :placeholder="t('auth.login.passwordPlaceholder')" 
                 class="pl-10 h-12 bg-surface border-border/50 focus:border-primary"
@@ -91,21 +120,24 @@ const handleLogin = async () => {
 
           <p
             v-if="statusKey"
-            class="rounded-xl border border-signal/20 bg-signal/10 px-4 py-3 text-sm font-medium text-signal"
+            class="rounded-lg border border-signal/20 bg-signal/10 px-4 py-3 text-sm font-medium text-signal"
+            role="status"
+            aria-live="polite"
           >
             {{ t(statusKey) }}
           </p>
 
           <p
             v-if="errorKey"
-            class="rounded-xl border border-warning/20 bg-warning/10 px-4 py-3 text-sm font-medium text-warning"
+            class="rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive"
+            role="alert"
           >
             {{ t(errorKey) }}
           </p>
 
           <Button 
             type="submit" 
-            class="w-full h-12 text-base font-bold mt-2 shadow-glow"
+            class="mt-2 h-12 w-full text-base font-semibold"
             :disabled="isLoading"
           >
             {{ isLoading ? t('auth.login.submitting') : t('auth.login.submit') }}
@@ -113,5 +145,5 @@ const handleLogin = async () => {
         </form>
       </div>
     </div>
-  </div>
+  </main>
 </template>

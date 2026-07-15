@@ -17,7 +17,7 @@ const emit = defineEmits<{
   (event: 'cancel', id: string): void
 }>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const prefix = 'admin.groupRateCampaigns.detail'
 
 const detail = ref<CampaignDetail | null>(null)
@@ -85,9 +85,12 @@ const formatMultiplier = (value: number | null): string => (
   value === null ? '—' : `${Number(value.toFixed(4)).toString()}×`
 )
 
-const formatDateTime = (value: string | null): string => (
-  value ? new Date(value).toLocaleString() : '—'
-)
+const formatDateTime = (value: string | null): string => {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+}
 
 const statusBadgeClass = (status: string): string => {
   switch (status) {
@@ -132,7 +135,10 @@ const statusBadgeClass = (status: string): string => {
         >
           <div
             v-if="open"
-            class="absolute right-0 top-0 bottom-0 w-full max-w-xl overflow-y-auto border-l border-border/60 bg-card shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            :aria-label="t(`${prefix}.title`)"
+            class="absolute bottom-0 right-0 top-0 w-full max-w-xl overflow-y-auto overscroll-contain border-l border-border/60 bg-card shadow-2xl"
           >
             <div class="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-border/60 bg-card/95 backdrop-blur px-5 py-4">
               <div class="flex items-center gap-2.5">

@@ -33,6 +33,7 @@ type PlatformClient interface {
 	NormalizeURL(value string) (string, error)
 	// 平台中性方法
 	LoginAdmin(baseURL string, platform upstream.Platform, account string, password string) (upstream.Session, error)
+	LoginAdminWithKey(baseURL string, platform upstream.Platform, key string, userID string) (upstream.Session, error)
 	VerifyAdmin(session upstream.Session) error
 	RefreshSession(session upstream.Session) (upstream.Session, error)
 	FetchAdminUsageStats(session upstream.Session, startDate, endDate string) (float64, error)
@@ -53,7 +54,9 @@ type PlatformClient interface {
 // MySiteStateSync 用于在 dashboard 登录成功后将 admin session 同步到 my_site_states 表，
 // 使 RealConnect 等依赖 my_site_states 的功能可以使用 admin 会话。
 type MySiteStateSync interface {
-	SyncAdminSession(ctx context.Context, userID string, adminAccountID string, session upstream.Session, identity string)
+	SyncAdminSession(ctx context.Context, userID string, adminAccountID string, session upstream.Session, identity string) error
+	StoredSession(ctx context.Context, userID string, adminAccountID string) (upstream.Session, bool, error)
+	RequireSession(ctx context.Context, userID string, adminAccountID string) (upstream.Session, error)
 }
 
 // Service 负责仪表盘 admin 账户的登录、状态校验、退出与令牌自动刷新。
@@ -97,7 +100,13 @@ func (s *Service) Status(ctx context.Context, userID string) (StatusResponse, er
 		return StatusResponse{Authenticated: false}, nil
 	}
 
-	if refreshed, changed := s.refreshIfNeeded(record); changed {
+	if s.mySiteSync != nil {
+		reconciled, err := s.reconcileAdminSession(ctx, userID, adminAccountID, record)
+		if err != nil {
+			return statusFromRecord(*record, false), nil
+		}
+		record = reconciled
+	} else if refreshed, changed := s.refreshIfNeeded(record); changed {
 		if err := s.store.Save(ctx, userID, adminAccountID, *refreshed); err != nil {
 			return StatusResponse{}, err
 		}
@@ -110,8 +119,7 @@ func (s *Service) Status(ctx context.Context, userID string) (StatusResponse, er
 	return statusFromRecord(*record, true), nil
 }
 
-// Login 处理 sub2api 和 new-api 的登录方式，登录成功后保存会话。
-// sub2api 支持 password 和 token 两种方式，new-api 只支持 password（账号密码）。
+// Login 处理 sub2api 和 new-api 的密码、兼容 Token 与管理 Key 登录，成功后保存会话。
 func (s *Service) Login(ctx context.Context, userID string, req LoginRequest) (StatusResponse, error) {
 	platform := strings.TrimSpace(req.Platform)
 	if platform == "" {
@@ -129,18 +137,33 @@ func (s *Service) Login(ctx context.Context, userID string, req LoginRequest) (S
 
 	switch platform {
 	case PlatformNewAPI:
-		// new-api 只支持账号密码登录
-		account := strings.TrimSpace(req.Email)
-		if account == "" || strings.TrimSpace(req.Password) == "" {
+		switch method {
+		case AuthMethodPassword:
+			account := strings.TrimSpace(req.Email)
+			if account == "" || strings.TrimSpace(req.Password) == "" {
+				return StatusResponse{}, requestError(ErrorMissingCredentials)
+			}
+			sess, err := s.platform.LoginAdmin(siteURL, upstream.PlatformNewAPI, account, req.Password)
+			if err != nil {
+				return StatusResponse{}, mapPlatformError(err)
+			}
+			session = sess
+			identity = account
+		case AuthMethodAdminKey:
+			adminKey := strings.TrimSpace(req.AdminKey)
+			userID := strings.TrimSpace(req.UserID)
+			if adminKey == "" || userID == "" {
+				return StatusResponse{}, requestError(ErrorMissingCredentials)
+			}
+			sess, err := s.platform.LoginAdminWithKey(siteURL, upstream.PlatformNewAPI, adminKey, userID)
+			if err != nil {
+				return StatusResponse{}, mapPlatformError(err)
+			}
+			session = sess
+			identity = "User ID " + userID
+		default:
 			return StatusResponse{}, requestError(ErrorMissingCredentials)
 		}
-		sess, err := s.platform.LoginAdmin(siteURL, upstream.PlatformNewAPI, account, req.Password)
-		if err != nil {
-			return StatusResponse{}, mapPlatformError(err)
-		}
-		session = sess
-		identity = account
-		method = AuthMethodPassword
 
 	case PlatformSub2API:
 		switch method {
@@ -170,6 +193,18 @@ func (s *Service) Login(ctx context.Context, userID string, req LoginRequest) (S
 				return StatusResponse{}, mapPlatformError(err)
 			}
 			session = result.Session
+
+		case AuthMethodAdminKey:
+			adminKey := strings.TrimSpace(req.AdminKey)
+			if adminKey == "" {
+				return StatusResponse{}, requestError(ErrorMissingCredentials)
+			}
+			sess, err := s.platform.LoginAdminWithKey(siteURL, upstream.PlatformSub2API, adminKey, "")
+			if err != nil {
+				return StatusResponse{}, mapPlatformError(err)
+			}
+			session = sess
+			identity = "Admin API Key"
 
 		default:
 			return StatusResponse{}, requestError(ErrorMissingCredentials)
@@ -209,7 +244,9 @@ func (s *Service) Login(ctx context.Context, userID string, req LoginRequest) (S
 
 	// 同步写入 my_site_states，确保 RealConnect 等功能可使用 admin 会话
 	if s.mySiteSync != nil {
-		s.mySiteSync.SyncAdminSession(ctx, userID, adminAccount.ID, session, identity)
+		if err := s.mySiteSync.SyncAdminSession(ctx, userID, adminAccount.ID, session, identity); err != nil {
+			return StatusResponse{}, err
+		}
 	}
 
 	return statusFromRecord(record, true), nil
@@ -258,7 +295,9 @@ func (s *Service) RefreshAdminSession(ctx context.Context, userID string) (Statu
 
 	// 同步写入 my_site_states，确保 RealConnect 等功能使用最新的 admin 会话
 	if s.mySiteSync != nil {
-		s.mySiteSync.SyncAdminSession(ctx, userID, adminAccountID, next.Session, next.Identity)
+		if err := s.mySiteSync.SyncAdminSession(ctx, userID, adminAccountID, next.Session, next.Identity); err != nil {
+			return StatusResponse{}, err
+		}
 	}
 
 	return statusFromRecord(next, true), nil
@@ -299,8 +338,24 @@ func (s *Service) refreshDueSessions(ctx context.Context) {
 		if err != nil || record == nil {
 			continue
 		}
-		refreshed, changed := s.refreshIfNeeded(record)
-		if !changed {
+		if strings.TrimSpace(record.Session.RefreshToken) == "" || !sessionRefreshDue(record.Session) {
+			continue
+		}
+		var refreshed *AdminSession
+		if s.mySiteSync != nil {
+			refreshed, err = s.reconcileAdminSession(ctx, ref.UserID, ref.AdminAccountID, record)
+			if err != nil {
+				log.Printf("dashboard admin refresh reconcile failed user_id=%s admin_account_id=%s err=%v", ref.UserID, ref.AdminAccountID, err)
+				continue
+			}
+		} else {
+			var changed bool
+			refreshed, changed = s.refreshIfNeeded(record)
+			if !changed {
+				continue
+			}
+		}
+		if sessionEqual(refreshed.Session, record.Session) {
 			continue
 		}
 		if err := s.store.Save(ctx, ref.UserID, ref.AdminAccountID, *refreshed); err != nil {
@@ -309,6 +364,46 @@ func (s *Service) refreshDueSessions(ctx context.Context) {
 		}
 		log.Printf("dashboard admin token refreshed user_id=%s admin_account_id=%s base_url=%s", ref.UserID, ref.AdminAccountID, refreshed.BaseURL)
 	}
+}
+
+// reconcileAdminSession uses my_site_states as the authoritative credential copy.
+// It also repairs historical deployments where a session existed only in Redis,
+// or Redis contains a newer rotated Sub2API token than PostgreSQL.
+func (s *Service) reconcileAdminSession(ctx context.Context, userID string, adminAccountID string, record *AdminSession) (*AdminSession, error) {
+	stored, exists, err := s.mySiteSync.StoredSession(ctx, userID, adminAccountID)
+	if err != nil {
+		return nil, err
+	}
+	if !exists || sessionAppearsNewer(record.Session, stored) {
+		if err := s.mySiteSync.SyncAdminSession(ctx, userID, adminAccountID, record.Session, record.Identity); err != nil {
+			return nil, err
+		}
+	}
+	canonical, err := s.mySiteSync.RequireSession(ctx, userID, adminAccountID)
+	if err != nil {
+		return nil, err
+	}
+	if sessionEqual(canonical, record.Session) {
+		return record, nil
+	}
+	next := *record
+	next.Session = canonical
+	next.LastRefreshedAt = nowMillis()
+	if err := s.store.Save(ctx, userID, adminAccountID, next); err != nil {
+		return nil, err
+	}
+	return &next, nil
+}
+
+func sessionRefreshDue(session upstream.Session) bool {
+	if session.ExpiresAt == nil {
+		return true
+	}
+	return *session.ExpiresAt-time.Now().UnixMilli() <= int64(time.Minute/time.Millisecond)
+}
+
+func sessionAppearsNewer(candidate upstream.Session, current upstream.Session) bool {
+	return candidate.ExpiresAt != nil && (current.ExpiresAt == nil || *candidate.ExpiresAt > *current.ExpiresAt)
 }
 
 func (s *Service) requireCurrentAdminAccount(ctx context.Context, userID string) (string, error) {
@@ -371,7 +466,9 @@ func mapPlatformError(err error) requestError {
 
 // sessionEqual 判断刷新前后会话是否发生变化，用于决定是否需要持久化。
 func sessionEqual(a, b upstream.Session) bool {
-	if a.AccessToken != b.AccessToken || a.RefreshToken != b.RefreshToken || a.TokenType != b.TokenType {
+	if a.Platform != b.Platform || a.BaseURL != b.BaseURL || a.Cookie != b.Cookie || a.UserID != b.UserID ||
+		a.AccessToken != b.AccessToken || a.AdminAPIKey != b.AdminAPIKey || a.RefreshToken != b.RefreshToken ||
+		a.TokenType != b.TokenType || a.QuotaPerUnit != b.QuotaPerUnit {
 		return false
 	}
 	if (a.ExpiresAt == nil) != (b.ExpiresAt == nil) {

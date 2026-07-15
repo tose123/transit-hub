@@ -294,6 +294,7 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 	// 复用 dashboard 的 Redis 会话存储与 sub2api 平台客户端，
 	// 并复用 upstreamService 读取已同步的上游站点数据（无额外 API 调用）。
 	metricsService := dashboard.NewMetricsService(dashboardSessionStore, platformService, upstreamService, metricsRepo, adminAccountsService)
+	metricsService.SetMySiteSync(mySitesService)
 	metricsService.StartScheduler(context.Background())
 	dashboard.RegisterRoutes(server.mux, dashboardService, metricsService)
 

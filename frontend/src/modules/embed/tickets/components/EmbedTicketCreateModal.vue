@@ -126,7 +126,7 @@ const submit = async () => {
           leave-from-class="opacity-100 scale-100"
           leave-to-class="opacity-0 scale-95"
         >
-          <div v-if="open" class="relative w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl border border-border/60 bg-card shadow-2xl">
+          <div v-if="open" role="dialog" aria-modal="true" :aria-label="t('embed.tickets.createModal.title')" class="relative max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-2xl border border-border/60 bg-card shadow-2xl">
             <div class="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-border/60 bg-card/95 backdrop-blur px-5 py-4">
               <h2 class="text-sm font-semibold text-foreground">{{ t('embed.tickets.createModal.title') }}</h2>
               <button
