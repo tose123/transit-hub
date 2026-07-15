@@ -230,8 +230,10 @@ git rev-parse HEAD
 
 ```bash
 release_commit="$(git rev-parse HEAD)"
-git diff --check origin/main.."$release_commit"
+git diff --check "$release_commit^".."$release_commit"
 ```
+
+尾随空格校验仅针对本次发布准备提交，避免重新判定已由上游同步流程验证且需保留 `transithub/main` 原格式的内容；候选整体仍由后续构建验证。
 
 依次完成所有必需检查。任一命令失败时停止，不创建本地 tag；报告原始失败输出，修复后从相应步骤重新执行。
 
