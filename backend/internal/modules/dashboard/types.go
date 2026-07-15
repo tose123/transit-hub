@@ -8,14 +8,14 @@ const (
 	PlatformNewAPI  = "newapi"
 )
 
-// sub2api 的两种登录方式：
+// 管理员登录方式：
 //   - password: 管理员邮箱 + 密码登录，换取 access/refresh token。
-//   - token:    直接提供 refresh token 与（可选）access token。
-//
-// 注：API Key 是 sub2api 的中转代理凭证，无法通过 /api/v1/auth/me 校验 role，已弃用。
+//   - token: 兼容旧 Sub2API access/refresh token 登录。
+//   - admin_key: Sub2API Admin API Key，或 new-api 管理员/Root 系统访问令牌。
 const (
 	AuthMethodPassword = "password"
 	AuthMethodToken    = "token"
+	AuthMethodAdminKey = "admin_key"
 )
 
 // 前端用于国际化的错误 key，统一挂在 admin.dashboard.adminAuth.errors 命名空间下。
@@ -51,6 +51,8 @@ type LoginRequest struct {
 	AccessToken  string `json:"accessToken"`
 	RefreshToken string `json:"refreshToken"`
 	TokenType    string `json:"tokenType"`
+	AdminKey     string `json:"adminKey"`
+	UserID       string `json:"userId"`
 }
 
 // StatusResponse 描述当前用户的仪表盘 admin 登录状态，供前端决定是否弹窗。

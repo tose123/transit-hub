@@ -532,7 +532,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="mx-auto flex w-full max-w-[1480px] flex-col gap-4 p-4 sm:p-6 lg:h-[calc(100vh-8rem)] lg:p-8">
+  <div class="mx-auto flex w-full max-w-[1480px] flex-col gap-4 p-4 sm:p-6 lg:h-[calc(100dvh-8rem)] lg:p-8">
     <header class="flex flex-col gap-4 border-b border-border/60 pb-4 lg:flex-row lg:items-end lg:justify-between">
       <div>
         <p class="text-xs font-semibold uppercase tracking-wide text-primary">{{ t('admin.lottery.eyebrow') }}</p>

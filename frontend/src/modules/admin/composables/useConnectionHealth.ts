@@ -321,7 +321,8 @@ export function formatConnectionHealthTime(iso: string | null): string {
   if (!iso) return '—'
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return '—'
-  return date.toLocaleString()
+  const locale = typeof document === 'undefined' ? 'zh-CN' : document.documentElement.lang || 'zh-CN'
+  return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(date)
 }
 
 // connectionHealthStateBadgeClass 是分组健康状态徽标的颜色映射，主列表和事件弹窗状态卡片

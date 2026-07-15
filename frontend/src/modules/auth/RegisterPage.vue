@@ -61,7 +61,7 @@ const handleRegister = async () => {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-background p-4 relative overflow-hidden">
+  <div class="relative flex min-h-dvh items-center justify-center overflow-hidden bg-background p-4">
     <!-- Background abstract -->
     <div class="absolute inset-0 -z-10 overflow-hidden">
       <div class="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-primary/10 blur-[100px] rounded-full" />

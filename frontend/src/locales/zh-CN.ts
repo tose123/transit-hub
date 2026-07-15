@@ -110,6 +110,7 @@ export default {
       toggleTheme: '切换主题',
       userProfile: '用户资料',
       switchWorkspace: '切换工作区',
+      skipToContent: '跳转到主要内容',
       openNavigation: '打开导航',
       closeNavigation: '关闭导航'
     },
@@ -123,6 +124,7 @@ export default {
       groupAssociations: '分组关联',
       connectionHealth: '分组健康',
       groupRateCampaigns: '活动调价',
+      sub2apiFeatures: '嵌入功能',
       settings: '系统设置',
       tickets: '工单',
       massEmail: '群发邮件',
@@ -537,16 +539,22 @@ export default {
           methodLabel: '登录方式',
           method: {
             password: '邮箱密码',
-            token: 'RT + AT'
+            token: 'RT + AT',
+            admin_key: 'Admin Key'
           },
           fields: {
             emailPlaceholder: '管理员邮箱',
             usernamePlaceholder: '管理员账号',
             passwordPlaceholder: '管理员密码',
             accessTokenPlaceholder: 'Access Token（可选，可留空）',
-            refreshTokenPlaceholder: 'Refresh Token（必填）',
+            refreshTokenPlaceholder: 'Refresh Token（与 Access Token 至少填写一个）',
             tokenTypePlaceholder: 'Token Type（可选，默认 Bearer）',
-            tokenHelp: '只需填写 Refresh Token 即可登录：系统会先用它刷新一次以获取最新过期时间，并在临期时自动刷新。'
+            tokenHelp: 'Access Token 与 Refresh Token 至少填写一个；提供 Refresh Token 时系统会自动刷新临期凭证。',
+            sub2apiAdminKeyPlaceholder: 'Sub2API Admin API Key',
+            sub2apiAdminKeyHelp: '该 Key 仅通过 x-api-key 发送到 Sub2API 管理接口。',
+            newApiAdminKeyPlaceholder: 'New-API 系统访问令牌',
+            newApiAdminKeyHelp: '填写管理员或 Root 账户在个人设置中生成的系统访问令牌。',
+            userIdPlaceholder: '该令牌所属的用户 ID'
           },
           submit: '登录并校验',
           submitting: '校验中...'
@@ -1075,7 +1083,9 @@ export default {
             password: '账号密码登录',
             passwordHelp: '使用站点账号密码登录，并自动保存会话。',
             token: 'Access Token / Refresh Token',
-            tokenHelp: '适用于 Cloudflare 或二次验证导致账号密码无法直连的 Sub2API 站点。'
+            tokenHelp: '适用于 Cloudflare 或二次验证导致账号密码无法直连的 Sub2API 站点。',
+            userKey: '用户 Key',
+            userKeyHelp: '使用 New-API 个人设置中生成的系统访问令牌。'
           },
           account: '登录账号',
           accountPlaceholder: '输入账号',
@@ -1090,6 +1100,11 @@ export default {
           tokenType: 'Token Type',
           tokenTypePlaceholder: '默认 Bearer',
           tokenHelp: '如果提供 refresh_token，系统会优先调用刷新接口换取新的 access_token 和过期时间。',
+          userId: '用户 ID',
+          userIdPlaceholder: '输入系统访问令牌所属的用户 ID',
+          userKey: '系统访问令牌',
+          userKeyPlaceholder: '粘贴 New-API 系统访问令牌',
+          userKeyHelp: '系统会通过 Authorization Bearer 与 New-Api-User 请求用户余额、分组和使用统计。',
           rechargeRate: '充值倍率',
           rechargeRatePlaceholder: '输入 USD 转 CNY 的倍率，如 7',
           rechargeRateHelp: '必填。人民币金额 = USD 金额 × 此倍率。',

@@ -94,7 +94,7 @@ const close = () => {
       <div v-if="open" class="fixed inset-0 z-[150] flex items-center justify-center p-4">
         <div class="absolute inset-0 bg-background/60 backdrop-blur-sm" @click="close" />
 
-        <div class="relative flex h-[min(640px,calc(100vh-2rem))] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border/60 bg-card shadow-2xl">
+      <div role="dialog" aria-modal="true" :aria-label="t(`${prefix}.title`)" class="relative flex h-[min(640px,calc(100dvh-2rem))] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border/60 bg-card shadow-2xl">
           <div class="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 px-5 py-4">
             <div class="flex min-w-0 items-center gap-2.5">
               <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">

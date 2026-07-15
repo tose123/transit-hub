@@ -34,6 +34,50 @@ type MetricsService struct {
 	upstreams   UpstreamLister
 	metricsRepo *MetricsRepository
 	accounts    AdminAccountService
+	sessionSync MySiteStateSync
+}
+
+func (s *MetricsService) SetMySiteSync(sync MySiteStateSync) {
+	s.sessionSync = sync
+}
+
+func (s *MetricsService) freshAdminSession(ctx context.Context, userID string, adminAccountID string, record *AdminSession) (upstream.Session, error) {
+	if s.sessionSync != nil {
+		stored, exists, err := s.sessionSync.StoredSession(ctx, userID, adminAccountID)
+		if err != nil {
+			return upstream.Session{}, err
+		}
+		if !exists || sessionAppearsNewer(record.Session, stored) {
+			if err := s.sessionSync.SyncAdminSession(ctx, userID, adminAccountID, record.Session, record.Identity); err != nil {
+				return upstream.Session{}, err
+			}
+		}
+		canonical, err := s.sessionSync.RequireSession(ctx, userID, adminAccountID)
+		if err != nil {
+			return upstream.Session{}, err
+		}
+		if !sessionEqual(canonical, record.Session) {
+			record.Session = canonical
+			record.LastRefreshedAt = nowMillis()
+			if err := s.store.Save(ctx, userID, adminAccountID, *record); err != nil {
+				return upstream.Session{}, err
+			}
+		}
+		return canonical, nil
+	}
+
+	refreshed, err := s.platform.RefreshSession(record.Session)
+	if err != nil {
+		return upstream.Session{}, err
+	}
+	if !sessionEqual(refreshed, record.Session) {
+		record.Session = refreshed
+		record.LastRefreshedAt = nowMillis()
+		if err := s.store.Save(ctx, userID, adminAccountID, *record); err != nil {
+			return upstream.Session{}, err
+		}
+	}
+	return refreshed, nil
 }
 
 func NewMetricsService(store SessionStore, platform PlatformClient, upstreams UpstreamLister, metricsRepo *MetricsRepository, accounts AdminAccountService) *MetricsService {
@@ -64,18 +108,9 @@ func (s *MetricsService) LiveMetrics(ctx context.Context, userID string) (Metric
 	}
 
 	// 如有必要先刷新令牌（new-api 不使用 refresh token，RefreshSession 会直接返回原会话）。
-	session := record.Session
-	refreshed, err := s.platform.RefreshSession(session)
+	session, err := s.freshAdminSession(ctx, userID, adminAccountID, record)
 	if err != nil {
 		return MetricsResponse{}, requestError(ErrorAdminOnly)
-	}
-	if !sessionEqual(refreshed, session) {
-		record.Session = refreshed
-		record.LastRefreshedAt = nowMillis()
-		if err := s.store.Save(ctx, userID, adminAccountID, *record); err != nil {
-			return MetricsResponse{}, err
-		}
-		session = refreshed
 	}
 
 	// 校验 admin 角色（平台中性）。
@@ -278,13 +313,11 @@ func (s *MetricsService) snapshotAll(ctx context.Context) {
 			continue
 		}
 
-		session := record.Session
-		refreshed, err := s.platform.RefreshSession(session)
+		session, err := s.freshAdminSession(ctx, userID, adminAccountID, record)
 		if err != nil {
 			log.Printf("dashboard scheduler: refresh session failed user_id=%s err=%v", userID, err)
 			continue
 		}
-		session = refreshed
 
 		// 昨日盈利（平台中性）。
 		todayProfit, err := s.platform.FetchAdminUsageStats(session, yesterday, yesterday)
@@ -374,16 +407,9 @@ func (s *MetricsService) AdminGroups(ctx context.Context, userID string) (AdminG
 		return AdminGroupsResponse{}, requestError(ErrorAdminOnly)
 	}
 
-	session := record.Session
-	refreshed, err := s.platform.RefreshSession(session)
+	session, err := s.freshAdminSession(ctx, userID, adminAccountID, record)
 	if err != nil {
 		return AdminGroupsResponse{}, requestError(ErrorAdminOnly)
-	}
-	if !sessionEqual(refreshed, session) {
-		record.Session = refreshed
-		record.LastRefreshedAt = nowMillis()
-		_ = s.store.Save(ctx, userID, adminAccountID, *record)
-		session = refreshed
 	}
 
 	groups, err := s.platform.FetchAdminGroups(session)
@@ -422,18 +448,9 @@ func (s *MetricsService) GroupUsageToday(ctx context.Context, userID string) (Gr
 		return GroupUsageTodayResponse{}, requestError(ErrorAdminOnly)
 	}
 
-	session := record.Session
-	refreshed, err := s.platform.RefreshSession(session)
+	session, err := s.freshAdminSession(ctx, userID, adminAccountID, record)
 	if err != nil {
 		return GroupUsageTodayResponse{}, requestError(ErrorAdminOnly)
-	}
-	if !sessionEqual(refreshed, session) {
-		record.Session = refreshed
-		record.LastRefreshedAt = nowMillis()
-		if err := s.store.Save(ctx, userID, adminAccountID, *record); err != nil {
-			return GroupUsageTodayResponse{}, err
-		}
-		session = refreshed
 	}
 
 	if err := s.platform.VerifyAdmin(session); err != nil {

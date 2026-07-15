@@ -17,12 +17,21 @@ type fakeMySiteSync struct {
 	identity       string
 }
 
-func (f *fakeMySiteSync) SyncAdminSession(ctx context.Context, userID string, adminAccountID string, session upstream.Session, identity string) {
+func (f *fakeMySiteSync) SyncAdminSession(ctx context.Context, userID string, adminAccountID string, session upstream.Session, identity string) error {
 	f.called = true
 	f.userID = userID
 	f.adminAccountID = adminAccountID
 	f.session = session
 	f.identity = identity
+	return nil
+}
+
+func (f *fakeMySiteSync) RequireSession(ctx context.Context, userID string, adminAccountID string) (upstream.Session, error) {
+	return f.session, nil
+}
+
+func (f *fakeMySiteSync) StoredSession(ctx context.Context, userID string, adminAccountID string) (upstream.Session, bool, error) {
+	return f.session, f.session.IsAuthenticated(), nil
 }
 
 func newRefreshTestService(store *fakeSessionStore, platform *fakePlatformClient, mySync *fakeMySiteSync) *Service {
@@ -118,6 +127,37 @@ func TestRefreshAdminSession_NoSession(t *testing.T) {
 
 	_, err := service.RefreshAdminSession(context.Background(), "user-1")
 	assertAdminOnlyError(t, err)
+}
+
+func TestStatusReconcilesRedisWithAuthoritativeSession(t *testing.T) {
+	oldExpiry := int64(1000)
+	newExpiry := int64(2000)
+	store := newFakeSessionStore()
+	store.set("user-1", "account-1", AdminSession{
+		Platform: PlatformSub2API,
+		Identity: "admin@example.com",
+		Session: upstream.Session{
+			Platform: PlatformSub2API, BaseURL: "https://example.com",
+			AccessToken: "old-token", RefreshToken: "old-refresh", ExpiresAt: &oldExpiry,
+		},
+	})
+	mySync := &fakeMySiteSync{session: upstream.Session{
+		Platform: PlatformSub2API, BaseURL: "https://example.com",
+		AccessToken: "new-token", RefreshToken: "new-refresh", ExpiresAt: &newExpiry,
+	}}
+	service := newRefreshTestService(store, &fakePlatformClient{}, mySync)
+
+	status, err := service.Status(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("Status returned error: %v", err)
+	}
+	if !status.Authenticated {
+		t.Fatal("expected authenticated status")
+	}
+	saved, _ := store.Get(context.Background(), "user-1", "account-1")
+	if saved == nil || saved.Session.AccessToken != "new-token" || saved.Session.RefreshToken != "new-refresh" {
+		t.Fatalf("expected Redis session to reconcile to authoritative session, got %+v", saved)
+	}
 }
 
 func assertAdminOnlyError(t *testing.T, err error) {

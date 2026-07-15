@@ -429,36 +429,51 @@ onMounted(async () => {
 <template>
   <div class="space-y-6 max-w-4xl mx-auto pb-12">
     <!-- Tab bar -->
-    <div class="flex justify-center mb-8 sticky top-0 z-10 bg-background/80 backdrop-blur-xl py-4 border-b border-border/40 -mx-6 px-6">
-      <div class="inline-flex p-1 bg-surface-elevated/40 backdrop-blur-xl border border-border/40 rounded-[1.25rem] shadow-sm overflow-x-auto max-w-full">
+    <div class="sticky top-0 z-10 -mx-3 mb-8 flex justify-start border-b border-border/40 bg-background/90 px-3 py-4 backdrop-blur-xl sm:-mx-6 sm:justify-center sm:px-6">
+      <div class="inline-flex max-w-full overflow-x-auto rounded-lg border border-border/50 bg-surface-elevated p-1 shadow-sm" role="tablist" :aria-label="t('admin.menu.settings')">
         <button
+          id="settings-tab-strategy"
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'strategy'"
+          aria-controls="settings-panel-strategy"
           @click="activeTab = 'strategy'"
-          class="relative px-6 py-2.5 text-sm font-medium transition-all duration-300 rounded-xl whitespace-nowrap"
+          class="relative whitespace-nowrap rounded-md px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:px-6"
           :class="activeTab === 'strategy' ? 'text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-surface/50'"
         >
-          <div v-if="activeTab === 'strategy'" class="absolute inset-0 bg-background border border-border/50 rounded-xl -z-10 shadow-sm"></div>
+          <div v-if="activeTab === 'strategy'" class="absolute inset-0 -z-10 rounded-md border border-border/50 bg-background shadow-sm"></div>
           <div class="flex items-center gap-2">
             <Timer class="w-4 h-4" />
             {{ t('admin.settings.tabs.strategy') }}
           </div>
         </button>
         <button
+          id="settings-tab-channels"
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'channels'"
+          aria-controls="settings-panel-channels"
           @click="activeTab = 'channels'"
-          class="relative px-6 py-2.5 text-sm font-medium transition-all duration-300 rounded-xl whitespace-nowrap"
+          class="relative whitespace-nowrap rounded-md px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:px-6"
           :class="activeTab === 'channels' ? 'text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-surface/50'"
         >
-          <div v-if="activeTab === 'channels'" class="absolute inset-0 bg-background border border-border/50 rounded-xl -z-10 shadow-sm"></div>
+          <div v-if="activeTab === 'channels'" class="absolute inset-0 -z-10 rounded-md border border-border/50 bg-background shadow-sm"></div>
           <div class="flex items-center gap-2">
             <MessageSquare class="w-4 h-4" />
             {{ t('admin.settings.tabs.channels') }}
           </div>
         </button>
         <button
+          id="settings-tab-email"
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'email'"
+          aria-controls="settings-panel-email"
           @click="activeTab = 'email'"
-          class="relative px-6 py-2.5 text-sm font-medium transition-all duration-300 rounded-xl whitespace-nowrap"
+          class="relative whitespace-nowrap rounded-md px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:px-6"
           :class="activeTab === 'email' ? 'text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-surface/50'"
         >
-          <div v-if="activeTab === 'email'" class="absolute inset-0 bg-background border border-border/50 rounded-xl -z-10 shadow-sm"></div>
+          <div v-if="activeTab === 'email'" class="absolute inset-0 -z-10 rounded-md border border-border/50 bg-background shadow-sm"></div>
           <div class="flex items-center gap-2">
             <Mail class="w-4 h-4" />
             {{ t('admin.settings.tabs.email') }}
@@ -470,19 +485,19 @@ onMounted(async () => {
     <div class="relative">
       <transition
         mode="out-in"
-        enter-active-class="transition-all duration-200 ease-out"
+        enter-active-class="transition-[opacity,transform] duration-200 ease-out"
         enter-from-class="opacity-0 translate-y-2"
         enter-to-class="opacity-100 translate-y-0"
-        leave-active-class="transition-all duration-150 ease-in"
+        leave-active-class="transition-[opacity,transform] duration-150 ease-in"
         leave-from-class="opacity-100 translate-y-0"
         leave-to-class="opacity-0 -translate-y-2"
       >
         <!-- ============================================ -->
         <!-- Strategy Tab                                 -->
         <!-- ============================================ -->
-        <div v-if="activeTab === 'strategy'" class="space-y-5">
+        <div v-if="activeTab === 'strategy'" id="settings-panel-strategy" class="space-y-5" role="tabpanel" aria-labelledby="settings-tab-strategy">
           <!-- Strategy Header + Save button -->
-          <div class="flex items-center justify-between">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h3 class="text-lg font-semibold text-foreground">{{ t('admin.settings.tabs.strategy') }}</h3>
               <p class="text-sm text-muted-foreground mt-0.5">{{ t('admin.settings.strategyDescription') }}</p>
@@ -512,8 +527,8 @@ onMounted(async () => {
                 </div>
               </div>
               <label class="relative inline-flex items-center cursor-pointer shrink-0 mt-1">
-                <input type="checkbox" v-model="enableRefreshInterval" class="sr-only peer">
-                <div class="w-11 h-6 bg-surface-elevated peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+                <input type="checkbox" v-model="enableRefreshInterval" class="sr-only peer" :aria-label="t('admin.settings.sections.basic.refreshInterval')">
+                <div class="peer h-6 w-11 rounded-full bg-surface-elevated peer-checked:bg-primary peer-focus-visible:ring-2 peer-focus-visible:ring-primary peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-background after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-border after:bg-white after:transition-transform after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
               </label>
             </div>
             <div v-if="enableRefreshInterval" class="px-5 pb-5 pt-0">
@@ -543,8 +558,8 @@ onMounted(async () => {
                 </div>
               </div>
               <label class="relative inline-flex items-center cursor-pointer shrink-0 mt-1">
-                <input type="checkbox" v-model="enableBalanceWarning" class="sr-only peer">
-                <div class="w-11 h-6 bg-surface-elevated peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+                <input type="checkbox" v-model="enableBalanceWarning" class="sr-only peer" :aria-label="t('admin.settings.sections.thresholds.balanceWarning')">
+                <div class="peer h-6 w-11 rounded-full bg-surface-elevated peer-checked:bg-primary peer-focus-visible:ring-2 peer-focus-visible:ring-primary peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-background after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-border after:bg-white after:transition-transform after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
               </label>
             </div>
             <div v-if="enableBalanceWarning" class="px-5 pb-5 pt-0">
@@ -562,10 +577,10 @@ onMounted(async () => {
                 <div class="grid gap-1.5">
                   <label class="text-xs font-medium text-muted-foreground">{{ t('admin.settings.notifyBots') }} <span class="text-destructive">*</span></label>
                   <div class="flex flex-wrap gap-2">
-                    <div v-for="bot in allBots" :key="'bal-' + bot.id" @click="toggleBalanceBot(bot.id)" class="flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer transition-colors select-none" :class="balanceSelectedBots.includes(bot.id) ? 'border-primary bg-primary/10 text-primary' : 'border-border/50 bg-surface/30 hover:bg-surface/50'">
+                    <button v-for="bot in allBots" :key="'bal-' + bot.id" type="button" :aria-pressed="balanceSelectedBots.includes(bot.id)" @click="toggleBalanceBot(bot.id)" class="flex select-none items-center gap-2 rounded-lg border px-3 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" :class="balanceSelectedBots.includes(bot.id) ? 'border-primary bg-primary/10 text-primary' : 'border-border/50 bg-surface/30 hover:bg-surface/50'">
                       <MessageSquare class="w-3.5 h-3.5" />
                       <span class="text-sm">{{ bot.name || t('admin.settings.unnamedBot') }}</span>
-                    </div>
+                    </button>
                     <div v-if="!hasBots" class="text-sm text-muted-foreground italic py-1">
                       {{ t('admin.settings.noBotsConfigured') }}
                     </div>
@@ -607,8 +622,8 @@ onMounted(async () => {
                 </div>
               </div>
               <label class="relative inline-flex items-center cursor-pointer shrink-0 mt-1">
-                <input type="checkbox" v-model="enableMultiplierAlert" class="sr-only peer">
-                <div class="w-11 h-6 bg-surface-elevated peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+                <input type="checkbox" v-model="enableMultiplierAlert" class="sr-only peer" :aria-label="t('admin.settings.sections.thresholds.multiplierChangeWarning')">
+                <div class="peer h-6 w-11 rounded-full bg-surface-elevated peer-checked:bg-primary peer-focus-visible:ring-2 peer-focus-visible:ring-primary peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-background after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-border after:bg-white after:transition-transform after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
               </label>
             </div>
             <div v-if="enableMultiplierAlert" class="px-5 pb-5 pt-0">
@@ -617,10 +632,10 @@ onMounted(async () => {
                 <div class="grid gap-1.5">
                   <label class="text-xs font-medium text-muted-foreground">{{ t('admin.settings.notifyBots') }} <span class="text-destructive">*</span></label>
                   <div class="flex flex-wrap gap-2">
-                    <div v-for="bot in allBots" :key="'mul-' + bot.id" @click="toggleMultiplierBot(bot.id)" class="flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer transition-colors select-none" :class="multiplierSelectedBots.includes(bot.id) ? 'border-primary bg-primary/10 text-primary' : 'border-border/50 bg-surface/30 hover:bg-surface/50'">
+                    <button v-for="bot in allBots" :key="'mul-' + bot.id" type="button" :aria-pressed="multiplierSelectedBots.includes(bot.id)" @click="toggleMultiplierBot(bot.id)" class="flex select-none items-center gap-2 rounded-lg border px-3 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" :class="multiplierSelectedBots.includes(bot.id) ? 'border-primary bg-primary/10 text-primary' : 'border-border/50 bg-surface/30 hover:bg-surface/50'">
                       <MessageSquare class="w-3.5 h-3.5" />
                       <span class="text-sm">{{ bot.name || t('admin.settings.unnamedBot') }}</span>
-                    </div>
+                    </button>
                     <div v-if="!hasBots" class="text-sm text-muted-foreground italic py-1">
                       {{ t('admin.settings.noBotsConfigured') }}
                     </div>
@@ -655,7 +670,7 @@ onMounted(async () => {
         <!-- ============================================ -->
         <!-- Channels Tab                                 -->
         <!-- ============================================ -->
-        <section v-else-if="activeTab === 'channels'" class="rounded-2xl border border-border/50 bg-card shadow-sm overflow-hidden w-full">
+        <section v-else-if="activeTab === 'channels'" id="settings-panel-channels" class="w-full overflow-hidden rounded-xl border border-border/50 bg-card shadow-sm" role="tabpanel" aria-labelledby="settings-tab-channels">
           <div class="p-6 border-b border-border/50 bg-surface/30 flex items-center justify-between">
             <div class="flex items-center gap-3">
               <div class="p-2 bg-blue-500/10 text-blue-500 rounded-xl">
@@ -851,7 +866,7 @@ onMounted(async () => {
         <!-- ============================================ -->
         <!-- Email (SMTP) Tab                              -->
         <!-- ============================================ -->
-        <div v-else-if="activeTab === 'email'" class="space-y-6">
+        <div v-else-if="activeTab === 'email'" id="settings-panel-email" class="space-y-6" role="tabpanel" aria-labelledby="settings-tab-email">
         <section class="rounded-2xl border border-border/50 bg-card shadow-sm overflow-hidden w-full">
           <div class="p-6 border-b border-border/50 bg-surface/30 flex items-center justify-between">
             <div class="flex items-center gap-3">

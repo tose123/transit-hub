@@ -33,6 +33,33 @@ func NewPlatformService(httpClient *HTTPClient) *PlatformService {
 	return &PlatformService{httpClient: httpClient}
 }
 
+// newAPIAuthOptions supports both legacy cookie sessions and system access tokens.
+// New-Api-User is required by new-api for either authentication mechanism.
+func newAPIAuthOptions(session Session) requestOptions {
+	return requestOptions{
+		Cookie:      session.Cookie,
+		UserID:      session.UserID,
+		AccessToken: session.AccessToken,
+		TokenType:   session.TokenType,
+	}
+}
+
+// sub2APIUserAuthOptions is intentionally limited to user JWTs. Sub2API Admin API
+// Keys are accepted only by /api/v1/admin routes and must not leak to user routes.
+func sub2APIUserAuthOptions(session Session) requestOptions {
+	return requestOptions{AccessToken: session.AccessToken, TokenType: session.TokenType}
+}
+
+func adminAuthOptions(session Session) requestOptions {
+	if session.Platform == PlatformSub2API && strings.TrimSpace(session.AdminAPIKey) != "" {
+		return requestOptions{AdminAPIKey: session.AdminAPIKey}
+	}
+	if session.Platform == PlatformNewAPI {
+		return newAPIAuthOptions(session)
+	}
+	return sub2APIUserAuthOptions(session)
+}
+
 func (s *PlatformService) NormalizeURL(value string) (string, error) {
 	trimmed := strings.TrimSpace(value)
 	if !strings.Contains(trimmed, "://") {
@@ -100,6 +127,33 @@ func (s *PlatformService) LoginWithToken(baseURL string, platform Platform, acco
 	return LoginResult{Platform: PlatformSub2API, Session: session, Metrics: metrics}, nil
 }
 
+// LoginWithUserKey signs in to new-api with the system access token generated in
+// Personal Settings -> Security Settings. new-api also requires the matching user ID.
+func (s *PlatformService) LoginWithUserKey(baseURL string, userID string, accessToken string) (LoginResult, error) {
+	normalizedURL, err := s.NormalizeURL(baseURL)
+	if err != nil {
+		return LoginResult{}, err
+	}
+	userID = strings.TrimSpace(userID)
+	accessToken = strings.TrimSpace(accessToken)
+	if userID == "" || accessToken == "" {
+		return LoginResult{}, newRequestError(ErrorAuth, PlatformNewAPI)
+	}
+	session := Session{
+		Platform:    PlatformNewAPI,
+		BaseURL:     normalizedURL,
+		UserID:      userID,
+		AccessToken: accessToken,
+		TokenType:   "Bearer",
+	}
+	session.QuotaPerUnit = s.fetchNewAPIQuotaPerUnit(session)
+	metrics, err := s.fetchNewAPIMetrics(session, nil)
+	if err != nil {
+		return LoginResult{}, err
+	}
+	return LoginResult{Platform: PlatformNewAPI, Session: session, Metrics: metrics}, nil
+}
+
 func (s *PlatformService) RefreshSession(session Session) (Session, error) {
 	if session.Platform == PlatformNewAPI {
 		return session, nil
@@ -160,6 +214,38 @@ func (s *PlatformService) LoginAdmin(baseURL string, platform Platform, account 
 	}
 }
 
+// LoginAdminWithKey validates a platform management key without converting it
+// into a refreshable login session. Sub2API uses x-api-key; new-api uses its
+// system access token together with New-Api-User.
+func (s *PlatformService) LoginAdminWithKey(baseURL string, platform Platform, key string, userID string) (Session, error) {
+	normalizedURL, err := s.NormalizeURL(baseURL)
+	if err != nil {
+		return Session{}, err
+	}
+	key = strings.TrimSpace(key)
+	userID = strings.TrimSpace(userID)
+	if key == "" || (platform == PlatformNewAPI && userID == "") {
+		return Session{}, newRequestError(ErrorAuth, platform)
+	}
+
+	session := Session{Platform: platform, BaseURL: normalizedURL}
+	switch platform {
+	case PlatformSub2API:
+		session.AdminAPIKey = key
+	case PlatformNewAPI:
+		session.AccessToken = key
+		session.TokenType = "Bearer"
+		session.UserID = userID
+		session.QuotaPerUnit = s.fetchNewAPIQuotaPerUnit(session)
+	default:
+		return Session{}, newRequestError(ErrorAuth, platform)
+	}
+	if err := s.VerifyAdmin(session); err != nil {
+		return Session{}, err
+	}
+	return session, nil
+}
+
 // VerifyAdmin 平台中性的 admin 校验：按 session.Platform 分发到对应平台的校验逻辑。
 func (s *PlatformService) VerifyAdmin(session Session) error {
 	switch session.Platform {
@@ -216,11 +302,10 @@ func (s *PlatformService) LoginNewAPIAdmin(baseURL string, username string, pass
 
 // VerifyNewAPIAdmin 调用 /api/user/self 校验 new-api 用户是否为 admin（role >= 10）。
 func (s *PlatformService) VerifyNewAPIAdmin(session Session) error {
-	if session.Platform != PlatformNewAPI || strings.TrimSpace(session.Cookie) == "" {
+	if session.Platform != PlatformNewAPI || !session.IsAuthenticated() {
 		return newRequestError(ErrorAuth, PlatformNewAPI)
 	}
-	cookieOptions := requestOptions{Cookie: session.Cookie, UserID: session.UserID}
-	response, err := s.httpClient.requestJSON(session.BaseURL+"/api/user/self", cookieOptions)
+	response, err := s.httpClient.requestJSON(session.BaseURL+"/api/user/self", newAPIAuthOptions(session))
 	if err != nil {
 		return err
 	}
@@ -237,8 +322,7 @@ func (s *PlatformService) VerifyNewAPIAdmin(session Session) error {
 // 失败时返回默认值 500000。
 func (s *PlatformService) fetchNewAPIQuotaPerUnit(session Session) float64 {
 	const defaultQuotaPerUnit = 500000
-	cookieOptions := requestOptions{Cookie: session.Cookie, UserID: session.UserID}
-	response, err := s.httpClient.requestJSON(session.BaseURL+"/api/status", cookieOptions)
+	response, err := s.httpClient.requestJSON(session.BaseURL+"/api/status", newAPIAuthOptions(session))
 	if err != nil {
 		log.Printf("new-api /api/status fetch failed base_url=%s err=%v, using default quota_per_unit", session.BaseURL, err)
 		return defaultQuotaPerUnit
@@ -255,9 +339,17 @@ func (s *PlatformService) VerifySub2APIAdmin(session Session) error {
 		log.Printf("my-sites sub2api admin verify skipped invalid_platform=%s base_url=%s", session.Platform, session.BaseURL)
 		return newRequestError(ErrorAuth, PlatformSub2API)
 	}
+	if strings.TrimSpace(session.AdminAPIKey) != "" {
+		requestURL := session.BaseURL + "/api/v1/admin/groups?page=1&page_size=1"
+		_, err := s.httpClient.requestJSON(requestURL, adminAuthOptions(session))
+		if err != nil {
+			log.Printf("my-sites sub2api admin key verify failed url=%s err=%v", requestURL, err)
+		}
+		return err
+	}
 	requestURL := session.BaseURL + "/api/v1/auth/me"
 	log.Printf("my-sites sub2api admin verify request url=%s token_type=%s access_token_set=%t", requestURL, session.TokenType, session.AccessToken != "")
-	response, err := s.httpClient.requestJSON(requestURL, requestOptions{AccessToken: session.AccessToken, TokenType: session.TokenType})
+	response, err := s.httpClient.requestJSON(requestURL, sub2APIUserAuthOptions(session))
 	if err != nil {
 		log.Printf("my-sites sub2api admin verify request failed url=%s err=%v", requestURL, err)
 		return err
@@ -304,7 +396,7 @@ func (s *PlatformService) FetchSub2APIGroupDailyStats(session Session, groups ..
 	}
 	today := time.Now().Format("2006-01-02")
 	statsURL := session.BaseURL + "/api/v1/admin/dashboard/groups?start_date=" + today + "&end_date=" + today
-	response, err := s.httpClient.requestJSON(statsURL, requestOptions{AccessToken: session.AccessToken, TokenType: session.TokenType})
+	response, err := s.httpClient.requestJSON(statsURL, adminAuthOptions(session))
 	if err != nil {
 		return nil, err
 	}
@@ -329,14 +421,11 @@ func (s *PlatformService) FetchSub2APIGroupDailyStats(session Session, groups ..
 // 查询指定日期范围内的总实际消费（即站点的盈利额度）。
 // startDate 和 endDate 格式为 "2006-01-02"，查询当天数据时两者传同一天即可。
 func (s *PlatformService) FetchSub2APIAdminUsageStats(session Session, startDate, endDate string) (float64, error) {
-	if session.Platform != PlatformSub2API || strings.TrimSpace(session.AccessToken) == "" {
+	if session.Platform != PlatformSub2API || !session.IsAuthenticated() {
 		return 0, newRequestError(ErrorAuth, PlatformSub2API)
 	}
 	statsURL := session.BaseURL + "/api/v1/admin/usage/stats?start_date=" + startDate + "&end_date=" + endDate
-	response, err := s.httpClient.requestJSON(statsURL, requestOptions{
-		AccessToken: session.AccessToken,
-		TokenType:   session.TokenType,
-	})
+	response, err := s.httpClient.requestJSON(statsURL, adminAuthOptions(session))
 	if err != nil {
 		return 0, err
 	}
@@ -358,13 +447,13 @@ func (s *PlatformService) FetchSub2APIAdminSiteBalance(session Session) (AdminSi
 // 先获取第 1 页以确定总数，然后并发获取剩余页面（并发上限 5），
 // 对每个用户按 filter 条件判断是否跳过，最后汇总余额。
 func (s *PlatformService) FetchSub2APIAdminSiteBalanceFiltered(session Session, filter BalanceFilter) (AdminSiteBalance, error) {
-	if session.Platform != PlatformSub2API || strings.TrimSpace(session.AccessToken) == "" {
+	if session.Platform != PlatformSub2API || !session.IsAuthenticated() {
 		return AdminSiteBalance{}, newRequestError(ErrorAuth, PlatformSub2API)
 	}
 
 	const pageSize = 100
 	const maxConcurrency = 5
-	authOptions := requestOptions{AccessToken: session.AccessToken, TokenType: session.TokenType}
+	authOptions := adminAuthOptions(session)
 
 	// 第 1 页顺序获取，确定总用户数。
 	firstURL := session.BaseURL + "/api/v1/admin/users?page=1&page_size=" + strconvInt(pageSize)
@@ -456,6 +545,24 @@ func sumFilteredBalances(users []any, filter BalanceFilter) float64 {
 // 复用 fetchSub2APIAvailableGroupsWithRates，与 fetchSub2APIMetrics 共用同一套
 // "默认倍率 + 专属倍率覆盖" 解析逻辑，避免两个入口分别维护、其中一个遗漏修复。
 func (s *PlatformService) FetchSub2APIAdminGroups(session Session) ([]GroupInfo, error) {
+	if strings.TrimSpace(session.AdminAPIKey) != "" {
+		adminGroups, err := s.FetchSub2APIAdminAllGroups(session)
+		if err != nil {
+			return nil, err
+		}
+		groups := make([]GroupInfo, 0, len(adminGroups))
+		for _, group := range adminGroups {
+			platform := group.Platform
+			groups = append(groups, GroupInfo{
+				ID:                group.ID,
+				Name:              group.Name,
+				Platform:          &platform,
+				Multiplier:        group.Multiplier,
+				MultiplierDisplay: group.MultiplierDisplay,
+			})
+		}
+		return groups, nil
+	}
 	return s.fetchSub2APIAvailableGroupsWithRates(session)
 }
 
@@ -477,7 +584,7 @@ func (s *PlatformService) fetchSub2APIAvailableGroupsWithRates(session Session) 
 	if session.Platform != PlatformSub2API || strings.TrimSpace(session.AccessToken) == "" {
 		return nil, newRequestError(ErrorAuth, PlatformSub2API)
 	}
-	authOptions := requestOptions{AccessToken: session.AccessToken, TokenType: session.TokenType}
+	authOptions := sub2APIUserAuthOptions(session)
 
 	response, err := s.httpClient.requestJSON(session.BaseURL+"/api/v1/groups/available", authOptions)
 	if err != nil {
@@ -589,10 +696,10 @@ type AdminGroupInfo struct {
 // FetchSub2APIAdminAllGroups 通过 /api/v1/admin/groups 获取管理端全量分组列表，
 // 包括专属分组、已禁用分组等 /api/v1/groups/available 不返回的条目。
 func (s *PlatformService) FetchSub2APIAdminAllGroups(session Session) ([]AdminGroupInfo, error) {
-	if session.Platform != PlatformSub2API || strings.TrimSpace(session.AccessToken) == "" {
+	if session.Platform != PlatformSub2API || !session.IsAuthenticated() {
 		return nil, newRequestError(ErrorAuth, PlatformSub2API)
 	}
-	authOptions := requestOptions{AccessToken: session.AccessToken, TokenType: session.TokenType}
+	authOptions := adminAuthOptions(session)
 	response, err := s.httpClient.requestJSON(session.BaseURL+"/api/v1/admin/groups", authOptions)
 	if err != nil {
 		return nil, err
@@ -655,27 +762,38 @@ func balanceExcluded(balance float64, excludes []float64) bool {
 }
 
 func (s *PlatformService) fetchSub2APIGroupUsageSummaryStats(session Session) ([]GroupDailyStat, error) {
-	if session.Platform != PlatformSub2API || strings.TrimSpace(session.AccessToken) == "" {
+	if session.Platform != PlatformSub2API || !session.IsAuthenticated() {
 		return nil, newRequestError(ErrorAuth, PlatformSub2API)
 	}
-	authOptions := requestOptions{AccessToken: session.AccessToken, TokenType: session.TokenType}
-	groupsResponse, err := s.httpClient.requestJSON(session.BaseURL+"/api/v1/groups/available", authOptions)
-	if err != nil {
-		return nil, err
-	}
-	groupNames := map[int64]string{}
-	for _, item := range dataArray(groupsResponse.Payload) {
-		id := firstNumber(item, []string{"id"})
-		name := firstString(item, []string{"name"})
-		if id == nil || name == nil || strings.TrimSpace(*name) == "" {
-			continue
+	groupNames := map[string]string{}
+	if strings.TrimSpace(session.AdminAPIKey) != "" {
+		groups, err := s.FetchSub2APIAdminAllGroups(session)
+		if err != nil {
+			return nil, err
 		}
-		groupNames[int64(*id)] = strings.TrimSpace(*name)
+		for _, group := range groups {
+			if group.ID != "" && strings.TrimSpace(group.Name) != "" {
+				groupNames[group.ID] = strings.TrimSpace(group.Name)
+			}
+		}
+	} else {
+		groupsResponse, err := s.httpClient.requestJSON(session.BaseURL+"/api/v1/groups/available", sub2APIUserAuthOptions(session))
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range dataArray(groupsResponse.Payload) {
+			id := groupID(item)
+			name := firstString(item, []string{"name"})
+			if id == "" || name == nil || strings.TrimSpace(*name) == "" {
+				continue
+			}
+			groupNames[id] = strings.TrimSpace(*name)
+		}
 	}
 	if len(groupNames) == 0 {
 		return nil, newRequestError(ErrorInvalidResponse, PlatformSub2API)
 	}
-	usageResponse, err := s.httpClient.requestJSON(session.BaseURL+"/api/v1/admin/groups/usage-summary", authOptions)
+	usageResponse, err := s.httpClient.requestJSON(session.BaseURL+"/api/v1/admin/groups/usage-summary", adminAuthOptions(session))
 	if err != nil {
 		return nil, err
 	}
@@ -685,11 +803,11 @@ func (s *PlatformService) fetchSub2APIGroupUsageSummaryStats(session Session) ([
 	}
 	stats := make([]GroupDailyStat, 0, len(items))
 	for _, item := range items {
-		groupID := firstNumber(item, []string{"group_id", "groupId"})
-		if groupID == nil {
+		usageGroupID := firstStringy(item, []string{"group_id", "groupId"})
+		if usageGroupID == "" {
 			continue
 		}
-		name := groupNames[int64(*groupID)]
+		name := groupNames[usageGroupID]
 		if name == "" {
 			continue
 		}
@@ -778,10 +896,10 @@ func sub2APIGroupDailyCost(item any) float64 {
 }
 
 func (s *PlatformService) FetchNewAPIGroupDailyStats(session Session, groups []GroupInfo) ([]GroupDailyStat, error) {
-	if session.Platform != PlatformNewAPI || strings.TrimSpace(session.Cookie) == "" {
+	if session.Platform != PlatformNewAPI || !session.IsAuthenticated() {
 		return nil, newRequestError(ErrorAuth, PlatformNewAPI)
 	}
-	cookieOptions := requestOptions{Cookie: session.Cookie, UserID: session.UserID}
+	cookieOptions := newAPIAuthOptions(session)
 	stats := make([]GroupDailyStat, 0, len(groups))
 	for _, group := range groups {
 		name := strings.TrimSpace(group.Name)
@@ -919,10 +1037,10 @@ func (s *PlatformService) fetchSub2APIKeyUsageToday(session Session) ([]KeyUsage
 // （沿用已验证的 self 统计能力，不做 token×全部分组的穷举以控制并发/请求量）。
 // 并发上限 maxKeyConcurrency，只保留今日 quota 换算金额 > 0 的 token。
 func (s *PlatformService) fetchNewAPIKeyUsageToday(session Session, _ []GroupInfo) ([]KeyUsageTodayStat, error) {
-	if session.Platform != PlatformNewAPI || strings.TrimSpace(session.Cookie) == "" {
+	if session.Platform != PlatformNewAPI || !session.IsAuthenticated() {
 		return nil, newRequestError(ErrorAuth, PlatformNewAPI)
 	}
-	cookieOptions := requestOptions{Cookie: session.Cookie, UserID: session.UserID}
+	cookieOptions := newAPIAuthOptions(session)
 
 	const pageSize = 100
 	const maxPages = 100
@@ -1092,7 +1210,7 @@ func (s *PlatformService) loginSub2API(baseURL string, email string, password st
 }
 
 func (s *PlatformService) fetchNewAPIMetrics(session Session, loginData map[string]any) (Metrics, error) {
-	cookieOptions := requestOptions{Cookie: session.Cookie, UserID: session.UserID}
+	cookieOptions := newAPIAuthOptions(session)
 	self, err := s.httpClient.requestJSON(session.BaseURL+"/api/user/self", cookieOptions)
 	if err != nil {
 		return Metrics{}, err
@@ -1310,15 +1428,13 @@ func groupID2(record map[string]any) string {
 // payload 为完整的创建参数（platform、type、credentials、extra 等），由调用方组装。
 // 返回新建账号的 ID（字符串）；失败时返回 error。
 func (s *PlatformService) CreateSub2APIAdminAccount(session Session, payload map[string]any) (string, error) {
-	if session.Platform != PlatformSub2API || strings.TrimSpace(session.AccessToken) == "" {
+	if session.Platform != PlatformSub2API || !session.IsAuthenticated() {
 		return "", newRequestError(ErrorAuth, PlatformSub2API)
 	}
-	response, err := s.httpClient.requestJSON(session.BaseURL+"/api/v1/admin/accounts", requestOptions{
-		AccessToken: session.AccessToken,
-		TokenType:   session.TokenType,
-		Method:      http.MethodPost,
-		Body:        payload,
-	})
+	options := adminAuthOptions(session)
+	options.Method = http.MethodPost
+	options.Body = payload
+	response, err := s.httpClient.requestJSON(session.BaseURL+"/api/v1/admin/accounts", options)
 	if err != nil {
 		return "", err
 	}
@@ -1342,14 +1458,12 @@ func (s *PlatformService) DeleteSub2APIKey(session Session, keyID string) error 
 
 // DeleteSub2APIAdminAccount 删除 admin 站点的指定转发账号。
 func (s *PlatformService) DeleteSub2APIAdminAccount(session Session, accountID string) error {
-	if session.Platform != PlatformSub2API || strings.TrimSpace(session.AccessToken) == "" {
+	if session.Platform != PlatformSub2API || !session.IsAuthenticated() {
 		return newRequestError(ErrorAuth, PlatformSub2API)
 	}
-	_, err := s.httpClient.requestJSON(session.BaseURL+"/api/v1/admin/accounts/"+accountID, requestOptions{
-		AccessToken: session.AccessToken,
-		TokenType:   session.TokenType,
-		Method:      http.MethodDelete,
-	})
+	options := adminAuthOptions(session)
+	options.Method = http.MethodDelete
+	_, err := s.httpClient.requestJSON(session.BaseURL+"/api/v1/admin/accounts/"+accountID, options)
 	return err
 }
 
@@ -1380,7 +1494,7 @@ func (s *PlatformService) fetchNewAPIAdminUsageStats(session Session, startDate,
 	startTS := start.Unix()
 	endTS := time.Date(end.Year(), end.Month(), end.Day(), 23, 59, 59, 0, end.Location()).Unix()
 	statURL := session.BaseURL + "/api/log/self/stat?type=2&start_timestamp=" + strconvInt(startTS) + "&end_timestamp=" + strconvInt(endTS)
-	cookieOptions := requestOptions{Cookie: session.Cookie, UserID: session.UserID}
+	cookieOptions := newAPIAuthOptions(session)
 	response, err := s.httpClient.requestJSON(statURL, cookieOptions)
 	if err != nil {
 		return 0, err
@@ -1409,7 +1523,7 @@ func (s *PlatformService) fetchNewAPIAdminSiteBalanceFiltered(session Session, f
 
 	const pageSize = 100
 	const maxConcurrency = 5
-	cookieOptions := requestOptions{Cookie: session.Cookie, UserID: session.UserID}
+	cookieOptions := newAPIAuthOptions(session)
 
 	firstURL := session.BaseURL + "/api/user/?p=1&page_size=" + strconvInt(int64(pageSize))
 	firstResponse, err := s.httpClient.requestJSON(firstURL, cookieOptions)
@@ -1527,7 +1641,7 @@ func (s *PlatformService) fetchNewAPIAdminGroups(session Session) ([]GroupInfo, 
 	if !session.IsAuthenticated() {
 		return nil, newRequestError(ErrorAuth, PlatformNewAPI)
 	}
-	cookieOptions := requestOptions{Cookie: session.Cookie, UserID: session.UserID}
+	cookieOptions := newAPIAuthOptions(session)
 	groupsPayload, err := s.httpClient.requestJSON(session.BaseURL+"/api/user/self/groups", cookieOptions)
 	if err != nil {
 		groupsPayload, err = s.httpClient.requestJSON(session.BaseURL+"/api/user/groups", cookieOptions)
@@ -1570,7 +1684,7 @@ func (s *PlatformService) fetchNewAPIAdminAllGroups(session Session) ([]AdminGro
 	if !session.IsAuthenticated() {
 		return nil, newRequestError(ErrorAuth, PlatformNewAPI)
 	}
-	cookieOptions := requestOptions{Cookie: session.Cookie, UserID: session.UserID}
+	cookieOptions := newAPIAuthOptions(session)
 	// 获取分组名列表
 	groupListPayload, err := s.httpClient.requestJSON(session.BaseURL+"/api/group/", cookieOptions)
 	if err != nil {
@@ -1663,9 +1777,11 @@ func (s *PlatformService) CreateNewAPIToken(session Session, name string, group 
 
 	// 步骤 1：创建 token
 	_, err := s.httpClient.requestJSON(session.BaseURL+"/api/token/", requestOptions{
-		Cookie: session.Cookie,
-		UserID: session.UserID,
-		Method: http.MethodPost,
+		Cookie:      session.Cookie,
+		UserID:      session.UserID,
+		AccessToken: session.AccessToken,
+		TokenType:   session.TokenType,
+		Method:      http.MethodPost,
 		Body: map[string]any{
 			"name":                 name,
 			"remain_quota":         0,
@@ -1702,8 +1818,10 @@ func (s *PlatformService) searchNewAPITokenByName(session Session, name string) 
 	for page := 1; page <= 10; page++ {
 		endpoint := session.BaseURL + "/api/token/?p=" + strconv.Itoa(page) + "&page_size=100"
 		response, err := s.httpClient.requestJSON(endpoint, requestOptions{
-			Cookie: session.Cookie,
-			UserID: session.UserID,
+			Cookie:      session.Cookie,
+			UserID:      session.UserID,
+			AccessToken: session.AccessToken,
+			TokenType:   session.TokenType,
 		})
 		if err != nil {
 			return "", err
@@ -1735,9 +1853,11 @@ func (s *PlatformService) searchNewAPITokenByName(session Session, name string) 
 // FetchNewAPITokenKey 调用 /api/token/:id/key 获取完整的 token key。
 func (s *PlatformService) FetchNewAPITokenKey(session Session, tokenID string) (string, error) {
 	response, err := s.httpClient.requestJSON(session.BaseURL+"/api/token/"+tokenID+"/key", requestOptions{
-		Cookie: session.Cookie,
-		UserID: session.UserID,
-		Method: http.MethodPost,
+		Cookie:      session.Cookie,
+		UserID:      session.UserID,
+		AccessToken: session.AccessToken,
+		TokenType:   session.TokenType,
+		Method:      http.MethodPost,
 	})
 	if err != nil {
 		return "", err
@@ -1756,8 +1876,10 @@ func (s *PlatformService) ListNewAPITokens(session Session) ([]Sub2APIKeyItem, e
 		return nil, newRequestError(ErrorAuth, PlatformNewAPI)
 	}
 	response, err := s.httpClient.requestJSON(session.BaseURL+"/api/token/?p=1&page_size=100", requestOptions{
-		Cookie: session.Cookie,
-		UserID: session.UserID,
+		Cookie:      session.Cookie,
+		UserID:      session.UserID,
+		AccessToken: session.AccessToken,
+		TokenType:   session.TokenType,
 	})
 	if err != nil {
 		return nil, err
@@ -1796,9 +1918,11 @@ func (s *PlatformService) DeleteNewAPIToken(session Session, tokenID string) err
 		return newRequestError(ErrorAuth, PlatformNewAPI)
 	}
 	_, err := s.httpClient.requestJSON(session.BaseURL+"/api/token/"+tokenID, requestOptions{
-		Cookie: session.Cookie,
-		UserID: session.UserID,
-		Method: http.MethodDelete,
+		Cookie:      session.Cookie,
+		UserID:      session.UserID,
+		AccessToken: session.AccessToken,
+		TokenType:   session.TokenType,
+		Method:      http.MethodDelete,
 	})
 	return err
 }
@@ -1814,9 +1938,11 @@ func (s *PlatformService) CreateNewAPIChannel(session Session, name string, base
 
 	// 步骤 1：创建 channel
 	_, err := s.httpClient.requestJSON(session.BaseURL+"/api/channel/", requestOptions{
-		Cookie: session.Cookie,
-		UserID: session.UserID,
-		Method: http.MethodPost,
+		Cookie:      session.Cookie,
+		UserID:      session.UserID,
+		AccessToken: session.AccessToken,
+		TokenType:   session.TokenType,
+		Method:      http.MethodPost,
 		Body: map[string]any{
 			"mode":                            "single",
 			"multi_key_mode":                  "",
@@ -1857,8 +1983,10 @@ func (s *PlatformService) searchNewAPIChannelByName(session Session, name string
 	for page := 1; page <= 10; page++ {
 		endpoint := session.BaseURL + "/api/channel/?p=" + strconv.Itoa(page) + "&page_size=100"
 		response, err := s.httpClient.requestJSON(endpoint, requestOptions{
-			Cookie: session.Cookie,
-			UserID: session.UserID,
+			Cookie:      session.Cookie,
+			UserID:      session.UserID,
+			AccessToken: session.AccessToken,
+			TokenType:   session.TokenType,
 		})
 		if err != nil {
 			return "", err
@@ -1893,9 +2021,11 @@ func (s *PlatformService) DeleteNewAPIChannel(session Session, channelID string)
 		return newRequestError(ErrorAuth, PlatformNewAPI)
 	}
 	_, err := s.httpClient.requestJSON(session.BaseURL+"/api/channel/"+channelID, requestOptions{
-		Cookie: session.Cookie,
-		UserID: session.UserID,
-		Method: http.MethodDelete,
+		Cookie:      session.Cookie,
+		UserID:      session.UserID,
+		AccessToken: session.AccessToken,
+		TokenType:   session.TokenType,
+		Method:      http.MethodDelete,
 	})
 	return err
 }
@@ -1914,10 +2044,10 @@ func (s *PlatformService) UpdateAdminGroupMultiplier(session Session, group Admi
 // updateSub2APIAdminGroupMultiplier 通过 GET+PUT /api/v1/admin/groups/{id} 更新 sub2api 分组倍率。
 // 先 GET 原始详情，复制必要字段，仅替换 rate_multiplier 后 PUT 回去，避免覆盖其他字段。
 func (s *PlatformService) updateSub2APIAdminGroupMultiplier(session Session, groupID string, multiplier float64) error {
-	if session.Platform != PlatformSub2API || strings.TrimSpace(session.AccessToken) == "" {
+	if session.Platform != PlatformSub2API || !session.IsAuthenticated() {
 		return newRequestError(ErrorAuth, PlatformSub2API)
 	}
-	authOptions := requestOptions{AccessToken: session.AccessToken, TokenType: session.TokenType}
+	authOptions := adminAuthOptions(session)
 
 	// GET 分组详情
 	getURL := session.BaseURL + "/api/v1/admin/groups/" + groupID
@@ -1938,12 +2068,10 @@ func (s *PlatformService) updateSub2APIAdminGroupMultiplier(session Session, gro
 	}
 
 	// PUT 更新
-	_, err = s.httpClient.requestJSON(getURL, requestOptions{
-		AccessToken: session.AccessToken,
-		TokenType:   session.TokenType,
-		Method:      http.MethodPut,
-		Body:        payload,
-	})
+	updateOptions := adminAuthOptions(session)
+	updateOptions.Method = http.MethodPut
+	updateOptions.Body = payload
+	_, err = s.httpClient.requestJSON(getURL, updateOptions)
 	return err
 }
 
@@ -1954,7 +2082,7 @@ func (s *PlatformService) updateNewAPIGroupRatio(session Session, groupName stri
 	if !session.IsAuthenticated() {
 		return newRequestError(ErrorAuth, PlatformNewAPI)
 	}
-	cookieOptions := requestOptions{Cookie: session.Cookie, UserID: session.UserID}
+	cookieOptions := newAPIAuthOptions(session)
 
 	// GET 当前 options
 	response, err := s.httpClient.requestJSON(session.BaseURL+"/api/option/", cookieOptions)
@@ -1983,9 +2111,11 @@ func (s *PlatformService) updateNewAPIGroupRatio(session Session, groupName stri
 
 	// PUT 更新 GroupRatio，需要 root option 权限（RootAuth）
 	_, err = s.httpClient.requestJSON(session.BaseURL+"/api/option/", requestOptions{
-		Cookie: session.Cookie,
-		UserID: session.UserID,
-		Method: http.MethodPut,
+		Cookie:      session.Cookie,
+		UserID:      session.UserID,
+		AccessToken: session.AccessToken,
+		TokenType:   session.TokenType,
+		Method:      http.MethodPut,
 		Body: map[string]any{
 			"key":   "GroupRatio",
 			"value": string(ratioBytes),
@@ -2011,7 +2141,7 @@ func (s *PlatformService) UpdateNewAPIChannelWeightStatus(session Session, chann
 	if session.Platform != PlatformNewAPI {
 		return newRequestError(ErrorAuth, PlatformNewAPI)
 	}
-	cookieOptions := requestOptions{Cookie: session.Cookie, UserID: session.UserID}
+	cookieOptions := newAPIAuthOptions(session)
 
 	getURL := session.BaseURL + "/api/channel/" + channelID
 	response, err := s.httpClient.requestJSON(getURL, cookieOptions)
@@ -2045,10 +2175,12 @@ func (s *PlatformService) UpdateNewAPIChannelWeightStatus(session Session, chann
 	// new-api 的 UpdateChannel 用 ShouldBindJSON(&PatchChannel) 直接绑定请求体，
 	// 字段必须在 JSON 顶层，不能像 CreateNewAPIChannel 那样包一层 "channel"。
 	_, err = s.httpClient.requestJSON(session.BaseURL+"/api/channel/", requestOptions{
-		Cookie: session.Cookie,
-		UserID: session.UserID,
-		Method: http.MethodPut,
-		Body:   channel,
+		Cookie:      session.Cookie,
+		UserID:      session.UserID,
+		AccessToken: session.AccessToken,
+		TokenType:   session.TokenType,
+		Method:      http.MethodPut,
+		Body:        channel,
 	})
 	return err
 }
@@ -2063,13 +2195,13 @@ func (s *PlatformService) UpdateNewAPIChannelWeightStatus(session Session, chann
 // remote_action=unsupported 并停止后续动作，不做任何猜测性的 PUT 请求。
 // 明文 credentials 只是原样透传（从 GET 响应直接搬到 PUT 请求体），本方法不解析、不记录其内容。
 func (s *PlatformService) UpdateSub2APIAdminAccountStatus(session Session, accountID string, status string) error {
-	if session.Platform != PlatformSub2API || strings.TrimSpace(session.AccessToken) == "" {
+	if session.Platform != PlatformSub2API || !session.IsAuthenticated() {
 		return newRequestError(ErrorAuth, PlatformSub2API)
 	}
 	if strings.TrimSpace(accountID) == "" {
 		return newRequestError(ErrorInvalidResponse, PlatformSub2API)
 	}
-	authOptions := requestOptions{AccessToken: session.AccessToken, TokenType: session.TokenType}
+	authOptions := adminAuthOptions(session)
 
 	getURL := session.BaseURL + "/api/v1/admin/accounts/" + url.PathEscape(accountID)
 	response, err := s.httpClient.requestJSON(getURL, authOptions)
@@ -2100,12 +2232,10 @@ func (s *PlatformService) UpdateSub2APIAdminAccountStatus(session Session, accou
 		payload["group_ids"] = groupIDs
 	}
 
-	_, err = s.httpClient.requestJSON(getURL, requestOptions{
-		AccessToken: session.AccessToken,
-		TokenType:   session.TokenType,
-		Method:      http.MethodPut,
-		Body:        payload,
-	})
+	updateOptions := adminAuthOptions(session)
+	updateOptions.Method = http.MethodPut
+	updateOptions.Body = payload
+	_, err = s.httpClient.requestJSON(getURL, updateOptions)
 	return err
 }
 
@@ -2132,7 +2262,7 @@ var sub2APIAdminUsersSortKeys = map[string]struct{}{
 // generic admin users list because this endpoint is usage-period based and the
 // upstream end_date is exclusive.
 func (s *PlatformService) FetchSub2APIAdminUserBreakdown(session Session, query Sub2APIUserBreakdownQuery) (Sub2APIUserBreakdown, error) {
-	if session.Platform != PlatformSub2API || strings.TrimSpace(session.AccessToken) == "" {
+	if session.Platform != PlatformSub2API || !session.IsAuthenticated() {
 		return Sub2APIUserBreakdown{}, newRequestError(ErrorAuth, PlatformSub2API)
 	}
 	query = normalizeSub2APIUserBreakdownQuery(query)
@@ -2143,7 +2273,7 @@ func (s *PlatformService) FetchSub2APIAdminUserBreakdown(session Session, query 
 	values.Set("limit", strconv.Itoa(query.Limit))
 	values.Set("timezone", query.Timezone)
 	requestURL := session.BaseURL + "/api/v1/admin/dashboard/user-breakdown?" + values.Encode()
-	response, err := s.httpClient.requestJSON(requestURL, requestOptions{AccessToken: session.AccessToken, TokenType: session.TokenType})
+	response, err := s.httpClient.requestJSON(requestURL, adminAuthOptions(session))
 	if err != nil {
 		return Sub2APIUserBreakdown{}, err
 	}
@@ -2226,13 +2356,13 @@ func stringFromRecord(record map[string]any, keys []string, fallback string) str
 // 其中 search 会先做空白裁剪并限制为 100 个 Unicode rune，然后再写入 url.Values，避免 handler 直接拼接 URL
 // 或把任意客户端参数转发到上游。
 func (s *PlatformService) FetchSub2APIAdminUsersPage(session Session, query Sub2APIAdminUsersQuery) (Sub2APIAdminUsersPage, error) {
-	if session.Platform != PlatformSub2API || strings.TrimSpace(session.AccessToken) == "" {
+	if session.Platform != PlatformSub2API || !session.IsAuthenticated() {
 		return Sub2APIAdminUsersPage{}, newRequestError(ErrorAuth, PlatformSub2API)
 	}
 	query = normalizeSub2APIAdminUsersQuery(query)
 	values := sanitizeSub2APIAdminUsersValues(query)
 	requestURL := session.BaseURL + "/api/v1/admin/users?" + values.Encode()
-	response, err := s.httpClient.requestJSON(requestURL, requestOptions{AccessToken: session.AccessToken, TokenType: session.TokenType})
+	response, err := s.httpClient.requestJSON(requestURL, adminAuthOptions(session))
 	if err != nil {
 		return Sub2APIAdminUsersPage{}, err
 	}
@@ -2351,7 +2481,7 @@ func intFromRecordOK(record map[string]any, keys []string) (int, bool) {
 // 当前 TransitHub workspace 的 admin session（已经过 RequireSession 刷新并校验过 admin 身份），
 // 不能使用 iframe 用户自己的 token 查询别的用户的资料。
 func (s *PlatformService) FetchSub2APIAdminUser(session Session, userID string) (Sub2APIAdminUser, error) {
-	if session.Platform != PlatformSub2API || strings.TrimSpace(session.AccessToken) == "" {
+	if session.Platform != PlatformSub2API || !session.IsAuthenticated() {
 		return Sub2APIAdminUser{}, newRequestError(ErrorAuth, PlatformSub2API)
 	}
 	trimmedID := strings.TrimSpace(userID)
@@ -2359,7 +2489,7 @@ func (s *PlatformService) FetchSub2APIAdminUser(session Session, userID string) 
 		return Sub2APIAdminUser{}, newRequestError(ErrorInvalidResponse, PlatformSub2API)
 	}
 	requestURL := session.BaseURL + "/api/v1/admin/users/" + url.PathEscape(trimmedID)
-	response, err := s.httpClient.requestJSON(requestURL, requestOptions{AccessToken: session.AccessToken, TokenType: session.TokenType})
+	response, err := s.httpClient.requestJSON(requestURL, adminAuthOptions(session))
 	if err != nil {
 		return Sub2APIAdminUser{}, err
 	}
@@ -2370,7 +2500,7 @@ func (s *PlatformService) FetchSub2APIAdminUser(session Session, userID string) 
 // 指定 Sub2API 用户的余额/充值历史。page/pageSize 非法时分别回退到 1/20；codeType 为空时不带
 // type 查询参数。
 func (s *PlatformService) FetchSub2APIAdminUserBalanceHistory(session Session, userID string, page int, pageSize int, codeType string) (Sub2APIUserBalanceHistory, error) {
-	if session.Platform != PlatformSub2API || strings.TrimSpace(session.AccessToken) == "" {
+	if session.Platform != PlatformSub2API || !session.IsAuthenticated() {
 		return Sub2APIUserBalanceHistory{}, newRequestError(ErrorAuth, PlatformSub2API)
 	}
 	trimmedID := strings.TrimSpace(userID)
@@ -2388,7 +2518,7 @@ func (s *PlatformService) FetchSub2APIAdminUserBalanceHistory(session Session, u
 	if trimmedType := strings.TrimSpace(codeType); trimmedType != "" {
 		requestURL += "&type=" + url.QueryEscape(trimmedType)
 	}
-	response, err := s.httpClient.requestJSON(requestURL, requestOptions{AccessToken: session.AccessToken, TokenType: session.TokenType})
+	response, err := s.httpClient.requestJSON(requestURL, adminAuthOptions(session))
 	if err != nil {
 		return Sub2APIUserBalanceHistory{}, err
 	}

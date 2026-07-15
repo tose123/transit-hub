@@ -4,7 +4,7 @@ export type ResolvedUpstreamPlatform = Exclude<UpstreamPlatform, 'auto'>
 
 export type UpstreamStatus = 'connecting' | 'syncing' | 'connected' | 'error'
 
-export type UpstreamAuthMode = 'password' | 'token'
+export type UpstreamAuthMode = 'password' | 'token' | 'user_key'
 
 export interface UpstreamSiteForm {
   name: string
@@ -16,6 +16,7 @@ export interface UpstreamSiteForm {
   accessToken: string
   refreshToken: string
   tokenType: string
+  userId: string
   rechargeRate: number
   remark: string
 }

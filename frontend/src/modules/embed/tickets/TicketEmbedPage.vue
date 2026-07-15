@@ -163,7 +163,7 @@ const pageShellClass = computed(() => (
 </script>
 
 <template>
-  <div :class="['min-h-screen text-foreground', rootBackgroundClass]">
+  <div :class="['min-h-dvh text-foreground', rootBackgroundClass]">
     <div :class="[containerWidthClass, containerPaddingClass]">
       <div :class="pageShellClass">
         <div v-if="pageState === 'loading'" class="flex flex-col items-center justify-center gap-3 py-16 text-muted-foreground">

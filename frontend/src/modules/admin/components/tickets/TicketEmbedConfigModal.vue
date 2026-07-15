@@ -248,7 +248,10 @@ const openPreview = () => {
         >
           <div
             v-if="open"
-            class="relative flex h-[min(760px,85vh)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-border/60 bg-card shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            :aria-label="t(`${prefix}.title`)"
+            class="relative flex h-[min(760px,85dvh)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-border/60 bg-card shadow-2xl"
           >
             <div class="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-card/95 backdrop-blur px-5 py-4">
               <div class="flex items-center gap-2.5">

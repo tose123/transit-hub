@@ -37,7 +37,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
       <div v-if="open && url" class="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-8">
         <div class="absolute inset-0 bg-background/80 backdrop-blur-sm" @click="emit('close')" />
 
-        <div class="relative flex max-h-full max-w-full flex-col items-center gap-3">
+        <div role="dialog" aria-modal="true" :aria-label="t('admin.tickets.detail.previewImage')" class="relative flex max-h-full max-w-full flex-col items-center gap-3">
           <button
             type="button"
             class="absolute -top-3 -right-3 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-border/60 bg-card text-muted-foreground shadow-lg transition-colors hover:text-foreground"
@@ -50,7 +50,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
           <img
             :src="url"
             :alt="name ?? t('admin.tickets.detail.previewImage')"
-            class="max-h-[80vh] max-w-full rounded-lg object-contain shadow-2xl sm:max-h-[85vh]"
+            class="max-h-[80dvh] max-w-full rounded-lg object-contain shadow-2xl sm:max-h-[85dvh]"
           />
           <p v-if="name" class="max-w-full truncate rounded-full bg-background/70 px-3 py-1 text-xs text-foreground backdrop-blur">
             {{ name }}

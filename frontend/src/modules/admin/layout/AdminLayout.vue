@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onBeforeUnmount, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { LayoutDashboard, Network, Settings, LogOut, Globe, Moon, Sun, Percent, Megaphone, ChevronDown, ArrowRightLeft, FolderTree, Link2, Activity, MessageSquare, Github, Mail, Menu, X, Trophy, Gift } from 'lucide-vue-next'
+import { LayoutDashboard, Network, Settings, LogOut, Globe, Moon, Sun, Percent, Megaphone, ChevronDown, ArrowRightLeft, FolderTree, Link2, Activity, MessageSquare, Github, Mail, Menu, X, Trophy, Gift, Boxes } from 'lucide-vue-next'
 import { useDark, useToggle } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAdminAccounts } from '../composables/useAdminAccounts'
@@ -121,15 +121,14 @@ interface MenuChild {
 // “分组管理”下的三个二级菜单顺序固定：分组倍率 -> 分组关联 -> 分组健康，不随业务改动调整。
 type MenuEntry =
   | { type: 'leaf'; name: string; path: string; icon: Component }
-  | { type: 'group'; name: string; icon: Component; children: MenuChild[] }
+  | { type: 'group'; id: string; name: string; icon: Component; children: MenuChild[] }
 
 const menuItems = computed<MenuEntry[]>(() => [
   { type: 'leaf', name: t('admin.menu.dashboard'), path: '/admin', icon: LayoutDashboard },
-  { type: 'leaf', name: t('admin.menu.leaderboard'), path: '/admin/leaderboard', icon: Trophy },
-  { type: 'leaf', name: t('admin.menu.lottery'), path: '/admin/lottery', icon: Gift },
   { type: 'leaf', name: t('admin.menu.upstream'), path: '/admin/upstream', icon: Network },
   {
     type: 'group',
+    id: 'group-management',
     name: t('admin.menu.groupManagement'),
     icon: FolderTree,
     children: [
@@ -138,9 +137,19 @@ const menuItems = computed<MenuEntry[]>(() => [
       { name: t('admin.menu.connectionHealth'), path: '/admin/connection-health', icon: Activity },
     ],
   },
-  { type: 'leaf', name: t('admin.menu.groupRateCampaigns'), path: '/admin/group-rate-campaigns', icon: Megaphone },
-  { type: 'leaf', name: t('admin.menu.tickets'), path: '/admin/tickets', icon: MessageSquare },
   { type: 'leaf', name: t('admin.menu.massEmail'), path: '/admin/mass-email', icon: Mail },
+  {
+    type: 'group',
+    id: 'embedded-features',
+    name: t('admin.menu.sub2apiFeatures'),
+    icon: Boxes,
+    children: [
+      { name: t('admin.menu.leaderboard'), path: '/admin/leaderboard', icon: Trophy },
+      { name: t('admin.menu.lottery'), path: '/admin/lottery', icon: Gift },
+      { name: t('admin.menu.groupRateCampaigns'), path: '/admin/group-rate-campaigns', icon: Megaphone },
+      { name: t('admin.menu.tickets'), path: '/admin/tickets', icon: MessageSquare },
+    ],
+  },
   { type: 'leaf', name: t('admin.menu.settings'), path: '/admin/settings', icon: Settings },
 ])
 
@@ -150,12 +159,12 @@ const expandedGroups = ref<Record<string, boolean>>({})
 const isGroupActive = (group: Extract<MenuEntry, { type: 'group' }>) => group.children.some((child) => child.path === route.path)
 
 const isGroupExpanded = (group: Extract<MenuEntry, { type: 'group' }>) => {
-  const manual = expandedGroups.value[group.name]
+  const manual = expandedGroups.value[group.id]
   return manual === undefined ? isGroupActive(group) : manual
 }
 
 const toggleGroup = (group: Extract<MenuEntry, { type: 'group' }>) => {
-  expandedGroups.value[group.name] = !isGroupExpanded(group)
+  expandedGroups.value[group.id] = !isGroupExpanded(group)
 }
 
 const handleMenuRouteClick = () => {
@@ -192,7 +201,13 @@ watch(
 </script>
 
 <template>
-  <div class="h-screen flex overflow-hidden overflow-x-hidden bg-background text-foreground">
+  <div class="flex h-dvh overflow-hidden overflow-x-hidden bg-background text-foreground">
+    <a
+      href="#admin-main-content"
+      class="sr-only fixed left-3 top-3 z-[70] rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground focus:not-sr-only focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background"
+    >
+      {{ t('admin.layout.skipToContent') }}
+    </a>
     <button
       v-if="!isWorkspaceSelectionPage && isMobileSidebarOpen"
       type="button"
@@ -210,7 +225,7 @@ watch(
     >
       <div class="h-16 flex items-center justify-between gap-3 px-4 lg:px-6 border-b border-border/40">
         <div class="flex items-center gap-2">
-          <img :src="logoUrl" :alt="t('brand.logoAlt')" class="h-8 w-8 shrink-0 object-contain" />
+          <img :src="logoUrl" :alt="t('brand.logoAlt')" width="32" height="32" class="h-8 w-8 shrink-0 object-contain" />
           <span class="text-xl font-bold tracking-tight text-foreground">{{ t('brand.name') }}</span>
         </div>
         <button
@@ -224,11 +239,11 @@ watch(
       </div>
 
       <nav class="flex-1 py-6 px-4 space-y-2 overflow-y-auto">
-        <template v-for="item in menuItems" :key="item.type === 'leaf' ? item.path : item.name">
+        <template v-for="item in menuItems" :key="item.type === 'leaf' ? item.path : item.id">
           <router-link
             v-if="item.type === 'leaf'"
             :to="item.path"
-            class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors"
+            class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             :class="[
               route.path === item.path
                 ? 'bg-primary text-primary-foreground font-medium shadow-md shadow-primary/20'
@@ -236,14 +251,16 @@ watch(
             ]"
             @click="handleMenuRouteClick"
           >
-            <component :is="item.icon" class="w-5 h-5" />
+            <component :is="item.icon" class="w-5 h-5" aria-hidden="true" />
             {{ item.name }}
           </router-link>
 
           <div v-else>
             <button
               type="button"
-              class="flex w-full items-center gap-3 px-3 py-2.5 rounded-xl transition-colors"
+              class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              :aria-expanded="isGroupExpanded(item)"
+              :aria-controls="`admin-menu-${item.id}`"
               :class="[
                 isGroupActive(item) && !isGroupExpanded(item)
                   ? 'bg-primary/10 text-primary font-medium'
@@ -251,17 +268,17 @@ watch(
               ]"
               @click="toggleGroup(item)"
             >
-              <component :is="item.icon" class="w-5 h-5" />
+              <component :is="item.icon" class="w-5 h-5" aria-hidden="true" />
               <span class="flex-1 text-left">{{ item.name }}</span>
-              <ChevronDown class="w-4 h-4 transition-transform" :class="{ 'rotate-180': isGroupExpanded(item) }" />
+              <ChevronDown class="w-4 h-4 transition-transform" :class="{ 'rotate-180': isGroupExpanded(item) }" aria-hidden="true" />
             </button>
 
-            <div v-if="isGroupExpanded(item)" class="mt-1 ml-4 space-y-1 border-l border-border/40 pl-3">
+            <div v-if="isGroupExpanded(item)" :id="`admin-menu-${item.id}`" class="mt-1 ml-4 space-y-1 border-l border-border/40 pl-3">
               <router-link
                 v-for="child in item.children"
                 :key="child.path"
                 :to="child.path"
-                class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors"
+                class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 :class="[
                   route.path === child.path
                     ? 'bg-primary text-primary-foreground font-medium shadow-md shadow-primary/20'
@@ -269,7 +286,7 @@ watch(
                 ]"
                 @click="handleMenuRouteClick"
               >
-                <component :is="child.icon" class="w-4 h-4" />
+                <component :is="child.icon" class="w-4 h-4" aria-hidden="true" />
                 {{ child.name }}
               </router-link>
             </div>
@@ -280,7 +297,7 @@ watch(
       <div class="p-4 border-t border-border/40">
         <button
           @click="handleLogout"
-          class="flex items-center gap-3 px-3 py-2.5 w-full rounded-xl text-muted-foreground hover:bg-surface-line hover:text-red-400 transition-colors"
+          class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-muted-foreground transition-colors hover:bg-surface-line hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           <LogOut class="w-5 h-5" />
           {{ t('admin.menu.signOut') }}
@@ -383,7 +400,7 @@ watch(
       </header>
 
       <!-- Content Area -->
-      <main class="flex-1 overflow-auto" :class="isWorkspaceSelectionPage ? '' : 'p-3 sm:p-6'">
+      <main id="admin-main-content" class="flex-1 overflow-auto" :class="isWorkspaceSelectionPage ? '' : 'p-3 sm:p-6'" tabindex="-1">
         <div v-if="!isWorkspaceSelectionPage && noticeKey" class="mb-4 rounded-lg border border-warning/40 bg-warning/10 p-4 text-sm text-warning">
           {{ t(noticeKey) }}
         </div>

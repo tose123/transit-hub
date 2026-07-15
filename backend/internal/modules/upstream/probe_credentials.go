@@ -108,13 +108,15 @@ func (s *PlatformService) resolveNewAPIChannelCredential(session Session, accoun
 //
 // 返回值是明文 key，调用方必须只在内存中短暂使用，绝不落库/日志/前端。
 func (s *PlatformService) FetchNewAPIChannelKey(session Session, channelID string) (string, error) {
-	if session.Platform != PlatformNewAPI || strings.TrimSpace(session.Cookie) == "" {
+	if session.Platform != PlatformNewAPI || !session.IsAuthenticated() {
 		return "", newProbeCredentialError(ReasonSecureVerificationRequired)
 	}
 	response, err := s.httpClient.requestJSON(session.BaseURL+"/api/channel/"+url.PathEscape(channelID)+"/key", requestOptions{
-		Cookie: session.Cookie,
-		UserID: session.UserID,
-		Method: http.MethodPost,
+		Cookie:      session.Cookie,
+		UserID:      session.UserID,
+		AccessToken: session.AccessToken,
+		TokenType:   session.TokenType,
+		Method:      http.MethodPost,
 	})
 	if err != nil {
 		// 把上游错误映射为脱敏 reason，绝不透传上游报文/密钥。
@@ -144,7 +146,7 @@ func (s *PlatformService) FetchNewAPIChannelKey(session Session, channelID strin
 //   - credentials 里没有任何明文 key（仍是脱敏形态）-> credentials_redacted。
 //   - 缺少可用 base_url -> base_url_unavailable。
 func (s *PlatformService) resolveSub2APIAccountCredential(session Session, account AdminGroupAccountInfo) (ProbeCredential, error) {
-	if session.Platform != PlatformSub2API || strings.TrimSpace(session.AccessToken) == "" {
+	if session.Platform != PlatformSub2API || !session.IsAuthenticated() {
 		return ProbeCredential{}, newProbeCredentialError(ReasonCredentialUnavailable)
 	}
 	accountID := strings.TrimSpace(account.ID)
@@ -153,7 +155,7 @@ func (s *PlatformService) resolveSub2APIAccountCredential(session Session, accou
 	}
 
 	exportURL := session.BaseURL + "/api/v1/admin/accounts/data?ids=" + url.QueryEscape(accountID) + "&include_proxies=false"
-	response, err := s.httpClient.requestJSON(exportURL, requestOptions{AccessToken: session.AccessToken, TokenType: session.TokenType})
+	response, err := s.httpClient.requestJSON(exportURL, adminAuthOptions(session))
 	if err != nil {
 		// 导出接口不可用（旧版本路由被 /:id 抢占、404、权限不足等）：统一标记导出不可用。
 		return ProbeCredential{}, newProbeCredentialError(ReasonExportUnavailable)

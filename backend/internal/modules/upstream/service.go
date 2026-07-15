@@ -384,6 +384,10 @@ func (s *Service) Create(ctx context.Context, userID string, dto CreateRequest) 
 	}
 	requestedPlatform := dto.Platform
 	platform := resolvedPlatform(dto.Platform)
+	account := strings.TrimSpace(dto.Account)
+	if normalizedAuthMode(dto.AuthMode) == AuthModeUserKey {
+		account = strings.TrimSpace(dto.UserID)
+	}
 	site := &Site{
 		ID:                id,
 		UserID:            userID,
@@ -392,7 +396,7 @@ func (s *Service) Create(ctx context.Context, userID string, dto CreateRequest) 
 		BaseURL:           strings.TrimSpace(dto.SiteURL),
 		Platform:          platform,
 		RequestedPlatform: requestedPlatform,
-		Account:           strings.TrimSpace(dto.Account),
+		Account:           account,
 		Remark:            strings.TrimSpace(dto.Remark),
 		RechargeRate:      dto.RechargeRate,
 		Status:            StatusConnecting,
@@ -480,6 +484,9 @@ func (s *Service) Update(ctx context.Context, userID string, id string, dto Upda
 	site.RequestedPlatform = dto.Platform
 	site.Platform = resolvedPlatform(dto.Platform)
 	site.Account = strings.TrimSpace(dto.Account)
+	if normalizedAuthMode(dto.AuthMode) == AuthModeUserKey {
+		site.Account = strings.TrimSpace(dto.UserID)
+	}
 	site.Remark = strings.TrimSpace(dto.Remark)
 	site.RechargeRate = dto.RechargeRate
 	shouldRelogin := strings.TrimSpace(dto.Password) != "" || strings.TrimSpace(dto.AccessToken) != "" || strings.TrimSpace(dto.RefreshToken) != ""
@@ -560,24 +567,36 @@ func resolvedPlatform(platform Platform) Platform {
 }
 
 func (s *Service) createLogin(dto CreateRequest) (LoginResult, error) {
-	if normalizedAuthMode(dto.AuthMode) == AuthModeToken {
+	switch normalizedAuthMode(dto.AuthMode) {
+	case AuthModeToken:
 		return s.platformService.LoginWithToken(dto.SiteURL, dto.Platform, dto.Account, dto.AccessToken, dto.RefreshToken, dto.TokenType)
+	case AuthModeUserKey:
+		return s.platformService.LoginWithUserKey(dto.SiteURL, dto.UserID, dto.AccessToken)
+	default:
+		return s.platformService.Login(dto.SiteURL, dto.Platform, dto.Account, dto.Password)
 	}
-	return s.platformService.Login(dto.SiteURL, dto.Platform, dto.Account, dto.Password)
 }
 
 func (s *Service) updateLogin(dto UpdateRequest) (LoginResult, error) {
-	if normalizedAuthMode(dto.AuthMode) == AuthModeToken {
+	switch normalizedAuthMode(dto.AuthMode) {
+	case AuthModeToken:
 		return s.platformService.LoginWithToken(dto.SiteURL, dto.Platform, dto.Account, dto.AccessToken, dto.RefreshToken, dto.TokenType)
+	case AuthModeUserKey:
+		return s.platformService.LoginWithUserKey(dto.SiteURL, dto.UserID, dto.AccessToken)
+	default:
+		return s.platformService.Login(dto.SiteURL, dto.Platform, dto.Account, dto.Password)
 	}
-	return s.platformService.Login(dto.SiteURL, dto.Platform, dto.Account, dto.Password)
 }
 
 func normalizedAuthMode(authMode AuthMode) AuthMode {
-	if authMode == AuthModeToken {
+	switch authMode {
+	case AuthModeToken:
 		return AuthModeToken
+	case AuthModeUserKey:
+		return AuthModeUserKey
+	default:
+		return AuthModePassword
 	}
-	return AuthModePassword
 }
 
 // Sync 手动触发单个站点的同步。
@@ -933,10 +952,13 @@ func validateCreate(dto CreateRequest) error {
 	if dto.Platform != PlatformAuto && dto.Platform != PlatformNewAPI && dto.Platform != PlatformSub2API {
 		fields = append(fields, "platform")
 	}
-	if dto.AuthMode != "" && dto.AuthMode != AuthModePassword && dto.AuthMode != AuthModeToken {
+	if dto.AuthMode != "" && dto.AuthMode != AuthModePassword && dto.AuthMode != AuthModeToken && dto.AuthMode != AuthModeUserKey {
 		fields = append(fields, "authMode")
 	}
 	if normalizedAuthMode(dto.AuthMode) == AuthModeToken && dto.Platform == PlatformNewAPI {
+		fields = append(fields, "platform")
+	}
+	if normalizedAuthMode(dto.AuthMode) == AuthModeUserKey && dto.Platform != PlatformNewAPI {
 		fields = append(fields, "platform")
 	}
 	if normalizedAuthMode(dto.AuthMode) == AuthModePassword && strings.TrimSpace(dto.Account) == "" {
@@ -947,6 +969,12 @@ func validateCreate(dto CreateRequest) error {
 	}
 	if normalizedAuthMode(dto.AuthMode) == AuthModeToken && strings.TrimSpace(dto.AccessToken) == "" && strings.TrimSpace(dto.RefreshToken) == "" {
 		fields = append(fields, "accessToken")
+	}
+	if normalizedAuthMode(dto.AuthMode) == AuthModeUserKey && strings.TrimSpace(dto.AccessToken) == "" {
+		fields = append(fields, "accessToken")
+	}
+	if normalizedAuthMode(dto.AuthMode) == AuthModeUserKey && strings.TrimSpace(dto.UserID) == "" {
+		fields = append(fields, "userId")
 	}
 	if dto.RechargeRate <= 0 {
 		fields = append(fields, "rechargeRate")
@@ -968,10 +996,13 @@ func validateUpdate(dto UpdateRequest) error {
 	if dto.Platform != PlatformAuto && dto.Platform != PlatformNewAPI && dto.Platform != PlatformSub2API {
 		fields = append(fields, "platform")
 	}
-	if dto.AuthMode != "" && dto.AuthMode != AuthModePassword && dto.AuthMode != AuthModeToken {
+	if dto.AuthMode != "" && dto.AuthMode != AuthModePassword && dto.AuthMode != AuthModeToken && dto.AuthMode != AuthModeUserKey {
 		fields = append(fields, "authMode")
 	}
 	if normalizedAuthMode(dto.AuthMode) == AuthModeToken && dto.Platform == PlatformNewAPI {
+		fields = append(fields, "platform")
+	}
+	if normalizedAuthMode(dto.AuthMode) == AuthModeUserKey && dto.Platform != PlatformNewAPI {
 		fields = append(fields, "platform")
 	}
 	if normalizedAuthMode(dto.AuthMode) == AuthModePassword && strings.TrimSpace(dto.Account) == "" {
@@ -979,6 +1010,12 @@ func validateUpdate(dto UpdateRequest) error {
 	}
 	if normalizedAuthMode(dto.AuthMode) == AuthModeToken && strings.TrimSpace(dto.AccessToken) == "" && strings.TrimSpace(dto.RefreshToken) == "" {
 		fields = append(fields, "accessToken")
+	}
+	if normalizedAuthMode(dto.AuthMode) == AuthModeUserKey && strings.TrimSpace(dto.AccessToken) == "" {
+		fields = append(fields, "accessToken")
+	}
+	if normalizedAuthMode(dto.AuthMode) == AuthModeUserKey && strings.TrimSpace(dto.UserID) == "" {
+		fields = append(fields, "userId")
 	}
 	if dto.RechargeRate <= 0 {
 		fields = append(fields, "rechargeRate")
