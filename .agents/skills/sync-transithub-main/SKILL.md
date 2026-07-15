@@ -1,6 +1,6 @@
 ---
 name: sync-transithub-main
-description: 将官方 deviseo/transit-hub 的 main 分支同步到本地 main；在同功能冲突中优先保留本地行为，完成冲突处理、项目影响分析、后端/前端/部署验证及中文更新摘要。用户要求拉取、同步、更新或合并 TransitHub 官方主线时使用。
+description: 将官方 deviseo/transit-hub 的 main 分支同步到本地 main；在同功能冲突中优先保留本地行为，完成冲突处理、项目影响分析、按改动做低成本必要验证及中文更新摘要。用户要求拉取、同步、更新或合并 TransitHub 官方主线时使用。
 ---
 
 # 同步 TransitHub 主线
@@ -136,22 +136,28 @@ git diff "$LOCAL_BEFORE"..HEAD -- <重要路径>
 
 ### 7. 按改动验证
 
-合并改到对应区域时运行：
+验证须与实际改动和风险成比例，以发现合并错误为目的，不为覆盖率或“多跑一项更放心”而重复测试。默认选择能证明结果的最低成本检查；轻量检查已覆盖风险时立即停止，不升级到更耗时、耗 CPU/内存、拉镜像、启容器或浏览器的验证。
+
+先运行对应区域的必要检查：
 
 - 后端 Go、`go.mod` 或 `go.sum`：
 
   ```bash
   cd backend
   go test ./...
-  go vet ./...
-  go build ./...
   ```
 
-- 前端源码或构建配置：从 `frontend/` 运行 `npm run build`；该命令已包含 `vue-tsc --noEmit`。若 `package.json` 或 `package-lock.json` 改动，先运行 `npm ci`。
+- `go test ./...` 已编译全部包时，不例行追加 `go build ./...`。仅当入口、构建标签、嵌入资源或发布构建链变化时再运行 `go build ./...`；仅当改动涉及并发、格式化接口、struct tag 等 `vet` 能发现的风险时再运行 `go vet ./...`。
+- 前端源码或构建配置：从 `frontend/` 运行 `npm run build`；该命令已包含 `vue-tsc --noEmit`。仅当依赖清单变化且现有 `node_modules` 缺失或明显不一致时先运行 `npm ci`，不得为例行同步重复安装依赖。
 - Compose 改动：从仓库根目录运行 `docker compose -f deploy/docker-compose.yml config` 与 `docker compose -f deploy/docker-compose.prod.yml config`。
-- `deploy/Dockerfile` 或跨前后端构建链改动：Docker 可用时运行 `docker build -f deploy/Dockerfile -t transithub:sync-check .`。
-- locale 或 i18n 改动：除前端构建外，核对 `zh-CN.ts` 与 `en-US.ts` 的新增键，并实际切换语言检查受影响页面。本项目无 `i18n:sync` 脚本，不得调用旧项目命令。
-- 数据库迁移、Redis、外部 upstream 或调度逻辑：能启动本地依赖时做对应集成验证；否则明确写出未验证项与手工检查步骤，不虚报通过。
+- locale 或 i18n 改动：除前端构建外，静态核对 `zh-CN.ts` 与 `en-US.ts` 的新增键。本项目无 `i18n:sync` 脚本，不得调用旧项目命令；默认不启动浏览器只为切换语言。
+
+以下高成本验证默认跳过，并在报告中注明未覆盖项：
+
+- 不为例行同步启动临时 PostgreSQL、Redis、外部 upstream、scheduler 或整套应用；数据库迁移先审查顺序、SQL 与已有相关测试。仅当用户明确要求集成验证，或高风险歧义无法用代码审查和现有测试排除时，才启动最小依赖。
+- 不拉取镜像或运行 `docker build` 只为增加验证项。即使 `deploy/Dockerfile` 或跨前后端构建链变化，也先用已有构建、配置解析和 diff 审查；仅当用户明确要求镜像验证，或无更轻量方式判断镜像能否构建时才运行。
+- 不安装浏览器自动化依赖，不启动 Chrome/Playwright，不做截图或逐页点击，只为验证 locale、样式或常规路由。仅当用户明确要求 UI/E2E 验证，或构建通过但合并问题只能在运行时复现时才做最小页面检查。
+- 不重复运行覆盖同一风险的全量命令，不为测试覆盖率新增测试，不因工具可用就扩大验证范围。
 
 从改动领域派生回归重点：
 
@@ -164,7 +170,7 @@ git diff "$LOCAL_BEFORE"..HEAD -- <重要路径>
 - 前端：受影响路由及创建/编辑/删除流程、抽屉/弹窗、加载/错误态、响应式布局及双语显示。
 - 配置/部署：新装默认值、旧配置升级、PostgreSQL/Redis 连接、Compose 与镜像启动。
 
-任何必需检查失败时，不得宣称同步完成。先判断是上游回归、冲突残留、本地定制不兼容或环境缺失；能在不改变本地行为的前提下修复者继续闭环，否则报告阻塞与选项。
+任何已选择的必要检查失败时，不得宣称同步完成。先判断是上游回归、冲突残留、本地定制不兼容或环境缺失；能在不改变本地行为的前提下修复者继续闭环，否则报告阻塞与选项。不得以失败为由无边界追加高成本测试；先用错误输出、代表性 diff 和最小复现定位。
 
 ### 8. 中文报告
 
